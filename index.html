@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yu-Gi-Oh! Tower RPG Tracker (MDPro4)</title>
+  <link rel="stylesheet" href="styles/main.css" />
+  <script src="https://unpkg.com/dexie@4/dist/dexie.js" defer></script>
+  <script src="src/constants.js" defer></script>
+  <script src="src/db/schema.js" defer></script>
+  <script src="src/db/saveManager.js" defer></script>
+  <script src="src/api/ygoprodeck.js" defer></script>
+  <script src="src/engine/ydk.js" defer></script>
+  <script src="src/engine/tower.js" defer></script>
+  <script src="src/engine/packSimulator.js" defer></script>
+  <script src="src/ui/towerView.js" defer></script>
+  <script src="src/ui/shopView.js" defer></script>
+  <script src="src/ui/deckBuilderView.js" defer></script>
+  <script src="src/ui/rosterView.js" defer></script>
+  <script src="src/ui/hallOfFameView.js" defer></script>
+  <script src="src/ui/settingsView.js" defer></script>
+  <script src="src/ui/app.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">⚔️ Yu-Gi-Oh! Tower RPG <span class="muted">(MDPro4 Tracker)</span></div>
+    <div id="statusBar" class="status-bar"></div>
+  </header>
+
+  <nav class="nav-tabs" id="navTabs">
+    <button class="nav-tab active" data-tab="tower">🏰 หอคอย 7 ชั้น</button>
+    <button class="nav-tab" data-tab="shop">🃏 ร้านค้า &amp; เปิดซอง</button>
+    <button class="nav-tab" data-tab="deck">📦 จัด Deck (.ydk)</button>
+    <button class="nav-tab" data-tab="roster">👥 คลังตัวละคร (Roster)</button>
+    <button class="nav-tab" data-tab="hof">🏆 Hall of Fame</button>
+    <button class="nav-tab" data-tab="settings">⚙️ ตั้งค่า &amp; Save</button>
+  </nav>
+
+  <main class="main-container" id="mainView"></main>
+
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal-panel" id="modalContent"></div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+</body>
+</html>
