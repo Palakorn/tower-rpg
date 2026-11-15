@@ -51,17 +51,24 @@
     const eligibleSets = PackSim.getEventEligibleSets(allSets, ev.floor);
 
     if (ev.type === 'free_pack') {
+      const Constants = root.YgoTower.Constants;
+      const sortedEligible = eligibleSets
+        .slice()
+        .sort((a, b) => (a.tcg_date || '').localeCompare(b.tcg_date || ''));
       const renderSetOptions = (filterText = '') => {
         const q = filterText.toLowerCase();
-        return eligibleSets
+        return sortedEligible
           .filter((s) => s.set_name.toLowerCase().includes(q) || s.set_code.toLowerCase().includes(q))
-          .slice(0, 40)
+          .slice(0, 100)
           .map(
             (s) => `
-            <div class="floor-item" style="margin-bottom:6px;">
-              <div>
-                <strong>${App.escapeHtml(s.set_name)}</strong>
-                <div class="muted">ชั้น ${s.assignedFloor} • ${(s.templateType || 'tcg').toUpperCase()}</div>
+            <div class="floor-item" style="margin-bottom:6px; gap:10px;">
+              <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                <img class="pack-thumb-sm" src="${App.escapeHtml(Constants.getPackImageUrl(s))}" alt="${App.escapeHtml(s.set_name)}" loading="lazy" />
+                <div style="min-width:0;">
+                  <strong>${App.escapeHtml(s.set_name)}</strong>
+                  <div class="muted">${App.escapeHtml(s.set_code)} • ชั้น ${s.assignedFloor} • ${(s.templateType || 'tcg').toUpperCase()}</div>
+                </div>
               </div>
               <button class="btn btn-sm btn-gold" data-pick-free-pack="${App.escapeHtml(s.set_name)}">เปิดฟรี</button>
             </div>
@@ -217,13 +224,22 @@
     const isUnlocked =
       selectedShopFloor <= season.currentFloor || (season.unlockedFloors || []).includes(selectedShopFloor);
     const eco = Tower.getFloorEconomy(selectedShopFloor, settings);
-    const floorSets = allSets.filter((s) => Number(s.assignedFloor) === selectedShopFloor);
+    const floorMeta = Constants.FLOORS.find((f) => f.floor === selectedShopFloor);
+    const floorSets = allSets
+      .filter((s) => Number(s.assignedFloor) === selectedShopFloor)
+      .sort((a, b) => (a.tcg_date || '').localeCompare(b.tcg_date || ''));
 
     const setsHtml = floorSets.length
       ? floorSets
           .map(
             (s) => `
-          <div class="opponent-card">
+          <div class="opponent-card pack-card">
+            <img
+              class="pack-thumb"
+              src="${App.escapeHtml(Constants.getPackImageUrl(s))}"
+              alt="${App.escapeHtml(s.set_name)}"
+              loading="lazy"
+            />
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <span class="badge">${(s.templateType || 'tcg').toUpperCase()}</span>
               <span class="muted">${App.escapeHtml(s.tcg_date || '-')}</span>
@@ -252,7 +268,8 @@
         </h3>
         <div class="form-row">${floorTabsHtml}</div>
         <p class="muted">
-          ชั้น ${selectedShopFloor}: ราคาซองละ <strong>${eco.packPrice} DP</strong> •
+          ชั้น ${selectedShopFloor}${floorMeta ? ` (${App.escapeHtml(floorMeta.era)})` : ''}:
+          ${floorSets.length} ซอง • ราคาซองละ <strong>${eco.packPrice} DP</strong> •
           สถานะ: ${isUnlocked ? '<span style="color:var(--success)">ปลดล็อกแล้ว</span>' : '<span style="color:var(--danger)">ล็อกอยู่</span>'}
         </p>
         <div class="opponent-grid">${setsHtml}</div>

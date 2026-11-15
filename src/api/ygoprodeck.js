@@ -30,8 +30,81 @@
   }
 
   /**
-   * Fetch all card sets and cards from YGOPRODeck API and cache in IndexedDB.
-   * Preserves any user-customized assignedFloor / templateType if the set already exists.
+   * Filter raw API/cached sets down to the curated pack list and apply floor + thumbnail mapping.
+   */
+  function filterAndMapCuratedSets(rawSets, existingSets = [], preserveFloor = false) {
+    const Constants = root.YgoTower.Constants;
+    const existingMap = new Map(existingSets.map((s) => [s.set_code, s]));
+
+    const mapped = [];
+    for (const s of rawSets) {
+      if (!s || !s.set_code || !s.set_name) continue;
+      const curated = Constants.findCuratedPack(s);
+      if (!curated) continue;
+
+      const prev = existingMap.get(s.set_code);
+      mapped.push({
+        set_code: s.set_code,
+        set_name: s.set_name,
+        num_of_cards: s.num_of_cards || 0,
+        tcg_date: s.tcg_date || curated.tcg_date || '',
+        set_image: s.set_image || Constants.getPackImageUrl(s),
+        assignedFloor: preserveFloor && prev ? prev.assignedFloor : curated.floor,
+        templateType: prev ? prev.templateType : guessTemplateType(s),
+        _order: curated.order,
+      });
+    }
+
+    mapped.sort((a, b) => a._order - b._order);
+    return mapped.map(({ _order, ...rest }) => rest);
+  }
+
+  const MAPPING_VERSION_KEY = 'ygo_tower_pack_mapping_version';
+
+  /**
+   * Migrate an existing IndexedDB sets cache so only the curated packs remain with updated floor mapping & thumbnails.
+   */
+  async function migrateCachedSetsIfNeeded() {
+    const Constants = root.YgoTower.Constants;
+    const db = root.YgoTower.DB.getDB();
+    const existingSets = await db.sets.toArray();
+    if (!existingSets.length) return false;
+
+    const targetVersion = String(Constants.CURATED_MAPPING_VERSION || 1);
+    const savedVersion =
+      typeof localStorage !== 'undefined' ? localStorage.getItem(MAPPING_VERSION_KEY) : null;
+
+    const needsMigration =
+      savedVersion !== targetVersion ||
+      existingSets.length !== Constants.CURATED_PACKS.length ||
+      existingSets.some((s) => !Constants.findCuratedPack(s) || !s.set_image);
+
+    if (!needsMigration) return false;
+
+    const existingMap = new Map(existingSets.map((s) => [s.set_code.toUpperCase(), s]));
+    const migrated = Constants.CURATED_PACKS.map((curated) => {
+      const prev = existingMap.get(curated.set_code.toUpperCase());
+      return {
+        set_code: prev?.set_code || curated.set_code,
+        set_name: prev?.set_name || curated.set_name,
+        num_of_cards: prev?.num_of_cards || 0,
+        tcg_date: prev?.tcg_date || curated.tcg_date,
+        set_image: prev?.set_image || Constants.getPackImageUrl(curated),
+        assignedFloor: curated.floor,
+        templateType: prev?.templateType || guessTemplateType(curated),
+      };
+    });
+
+    await db.sets.clear();
+    await db.sets.bulkPut(migrated);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(MAPPING_VERSION_KEY, targetVersion);
+    }
+    return true;
+  }
+
+  /**
+   * Fetch curated card sets and cards from YGOPRODeck API and cache in IndexedDB.
    */
   async function syncFromApi(onProgress) {
     const db = root.YgoTower.DB.getDB();
@@ -46,26 +119,16 @@
     }
     const rawSets = await setsRes.json();
 
-    // Preserve user custom floor assignments if already cached
+    // Preserve user templateType if already cached; enforce curated pack whitelist + floor mapping
     const existingSets = await db.sets.toArray();
-    const existingMap = new Map(existingSets.map((s) => [s.set_code, s]));
-
-    const mappedSets = rawSets
-      .filter((s) => s.set_code && s.set_name)
-      .map((s) => {
-        const prev = existingMap.get(s.set_code);
-        return {
-          set_code: s.set_code,
-          set_name: s.set_name,
-          num_of_cards: s.num_of_cards || 0,
-          tcg_date: s.tcg_date || '',
-          assignedFloor: prev ? prev.assignedFloor : assignFloorByDate(s.tcg_date),
-          templateType: prev ? prev.templateType : guessTemplateType(s),
-        };
-      });
+    const mappedSets = filterAndMapCuratedSets(rawSets, existingSets, false);
 
     report(`กำลังบันทึกซองการ์ด ${mappedSets.length} ซองลง IndexedDB...`, 25);
+    await db.sets.clear();
     await db.sets.bulkPut(mappedSets);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(MAPPING_VERSION_KEY, String(root.YgoTower.Constants.CURATED_MAPPING_VERSION || 1));
+    }
 
     report('กำลังดึงข้อมูลการ์ดทั้งหมดจาก YGOPRODeck (อาจใช้เวลาสักครู่)...', 40);
     const cardsRes = await fetch(`${API_BASE}/cardinfo.php`);
@@ -143,5 +206,7 @@
     getCacheStats,
     getCardsInSet,
     assignFloorByDate,
+    filterAndMapCuratedSets,
+    migrateCachedSetsIfNeeded,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -104,7 +104,7 @@
     renderCurrentView();
   }
 
-  function init() {
+  async function init() {
     document.getElementById('navTabs').addEventListener('click', (e) => {
       const btn = e.target.closest('.nav-tab');
       if (!btn) return;
@@ -114,6 +114,14 @@
     document.getElementById('modalBackdrop').addEventListener('click', (e) => {
       if (e.target.id === 'modalBackdrop') closeModal();
     });
+
+    try {
+      if (root.YgoTower.Api && typeof root.YgoTower.Api.migrateCachedSetsIfNeeded === 'function') {
+        await root.YgoTower.Api.migrateCachedSetsIfNeeded();
+      }
+    } catch (err) {
+      console.warn('Pack cache migration skipped:', err);
+    }
 
     renderCurrentView();
   }

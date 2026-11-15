@@ -141,11 +141,13 @@
     });
 
     const renderSetManager = (query = '') => {
+      const Constants = root.YgoTower.Constants;
       const listEl = document.getElementById('setManagerList');
       const q = query.toLowerCase();
       const matched = allSets
         .filter((s) => !q || s.set_name.toLowerCase().includes(q) || s.set_code.toLowerCase().includes(q))
-        .slice(0, 25);
+        .slice()
+        .sort((a, b) => (a.tcg_date || '').localeCompare(b.tcg_date || ''));
 
       if (!matched.length) {
         listEl.innerHTML = `<p class="muted">ไม่พบซองที่ค้นหา</p>`;
@@ -160,7 +162,15 @@
               .map(
                 (s) => `
               <tr>
-                <td><strong>${App.escapeHtml(s.set_name)}</strong> <span class="muted">(${App.escapeHtml(s.set_code)})</span></td>
+                <td>
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <img class="pack-thumb-sm" src="${App.escapeHtml(Constants.getPackImageUrl(s))}" alt="${App.escapeHtml(s.set_name)}" loading="lazy" />
+                    <div>
+                      <strong>${App.escapeHtml(s.set_name)}</strong>
+                      <span class="muted">(${App.escapeHtml(s.set_code)})</span>
+                    </div>
+                  </div>
+                </td>
                 <td class="muted">${App.escapeHtml(s.tcg_date || '-')}</td>
                 <td>
                   <select data-set-floor="${App.escapeHtml(s.set_code)}">
