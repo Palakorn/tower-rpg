@@ -2,15 +2,16 @@
   root.YgoTower = root.YgoTower || {};
 
   /**
-   * Export all user save data (roster, seasons, settings, hallOfFame) as a JSON string.
+   * Export all user save data (roster, seasons, settings, hallOfFame, recipes) as a JSON string.
    */
   async function exportSaveJson() {
     const db = root.YgoTower.DB.getDB();
-    const [roster, seasons, settings, hallOfFame] = await Promise.all([
+    const [roster, seasons, settings, hallOfFame, recipes] = await Promise.all([
       db.roster.toArray(),
       db.seasons.toArray(),
       db.settings.toArray(),
       db.hallOfFame.toArray(),
+      db.recipes.toArray(),
     ]);
 
     const payload = {
@@ -21,6 +22,7 @@
         seasons,
         settings,
         hallOfFame,
+        recipes,
       },
     };
 
@@ -43,7 +45,7 @@
   }
 
   /**
-   * Import save JSON and restore roster, seasons, settings, and hallOfFame.
+   * Import save JSON and restore roster, seasons, settings, hallOfFame, and recipes.
    */
   async function importSaveJson(jsonText) {
     const parsed = JSON.parse(jsonText);
@@ -51,25 +53,28 @@
       throw new Error('ไฟล์ Save ไม่ถูกต้อง (ไม่พบโครงสร้าง data)');
     }
 
-    const { roster = [], seasons = [], settings = [], hallOfFame = [] } = parsed.data;
+    const { roster = [], seasons = [], settings = [], hallOfFame = [], recipes = [] } = parsed.data;
     const db = root.YgoTower.DB.getDB();
 
-    await db.transaction('rw', db.roster, db.seasons, db.settings, db.hallOfFame, async () => {
+    await db.transaction('rw', db.roster, db.seasons, db.settings, db.hallOfFame, db.recipes, async () => {
       await db.roster.clear();
       await db.seasons.clear();
       await db.settings.clear();
       await db.hallOfFame.clear();
+      await db.recipes.clear();
 
       if (roster.length) await db.roster.bulkPut(roster);
       if (seasons.length) await db.seasons.bulkPut(seasons);
       if (settings.length) await db.settings.bulkPut(settings);
       if (hallOfFame.length) await db.hallOfFame.bulkPut(hallOfFame);
+      if (recipes.length) await db.recipes.bulkPut(recipes);
     });
 
     return {
       rosterCount: roster.length,
       seasonsCount: seasons.length,
       hallOfFameCount: hallOfFame.length,
+      recipesCount: recipes.length,
     };
   }
 

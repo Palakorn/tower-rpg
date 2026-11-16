@@ -134,10 +134,65 @@
     };
   }
 
+  /**
+   * Evaluate a recipe deck against the player's card collection.
+   * Each card copy gets owned=true (opacity 1) if available in collection, or owned=false (opacity 0.5).
+   * @param {{ main: number[], extra: number[], side: number[] }} deck
+   * @param {Record<string, number>} collection
+   */
+  function evaluateRecipeAgainstCollection(deck, collection) {
+    const remaining = new Map();
+    if (collection && typeof collection === 'object') {
+      for (const [k, v] of Object.entries(collection)) {
+        const count = Number(v) || 0;
+        if (count > 0) remaining.set(String(k), count);
+      }
+    }
+
+    let totalCards = 0;
+    let ownedCards = 0;
+
+    const mapZone = (ids) =>
+      (ids || []).map((id) => {
+        const key = String(id);
+        const avail = remaining.get(key) || 0;
+        const owned = avail > 0;
+        if (owned) {
+          remaining.set(key, avail - 1);
+          ownedCards += 1;
+        }
+        totalCards += 1;
+        return {
+          id,
+          owned,
+          opacity: owned ? 1 : 0.5,
+        };
+      });
+
+    const main = mapZone(deck && deck.main);
+    const extra = mapZone(deck && deck.extra);
+    const side = mapZone(deck && deck.side);
+    const missingCards = totalCards - ownedCards;
+    const completionPct = totalCards > 0 ? Math.round((ownedCards / totalCards) * 100) : 0;
+
+    return {
+      main,
+      extra,
+      side,
+      stats: {
+        totalCards,
+        ownedCards,
+        missingCards,
+        completionPct,
+      },
+    };
+  }
+
   return {
     parseYdk,
     generateYdk,
     addDeckToCollection,
     validateDeck,
+    evaluateRecipeAgainstCollection,
   };
 });

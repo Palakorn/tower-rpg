@@ -331,6 +331,35 @@ input, select, textarea {
   object-fit: cover;
 }
 
+.deck-card-row {
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.deck-card-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.deck-card-thumb {
+  width: 30px;
+  aspect-ratio: 421 / 614;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #0b0d13;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.deck-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -503,4 +532,76 @@ th, td {
     max-width: 220px;
     margin: 0 auto;
   }
+}
+
+.recipe-list-item {
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.recipe-list-item:hover {
+  border-color: var(--primary);
+}
+
+.recipe-list-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recipe-summary-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.recipe-zone-header {
+  margin-bottom: 8px;
+  font-size: 0.92rem;
+}
+
+.recipe-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.recipe-card-tile {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.recipe-card-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.recipe-card-tile.owned {
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.recipe-card-tile img {
+  width: 100%;
+  aspect-ratio: 421 / 614;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #0b0d13;
+}
+
+.recipe-card-name {
+  font-size: 0.72rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

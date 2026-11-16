@@ -28,6 +28,9 @@
     db.version(3).stores({
       sets: 'set_name, set_code, tcg_date, assignedFloor',
     });
+    db.version(4).stores({
+      recipes: '++id, name, updatedAt',
+    });
 
     dbInstance = db;
     return dbInstance;
@@ -79,11 +82,63 @@
     return id;
   }
 
+  /**
+   * Get all saved deck recipes ordered by most recently updated first.
+   */
+  async function getRecipes() {
+    const db = getDB();
+    return db.recipes.orderBy('updatedAt').reverse().toArray();
+  }
+
+  /**
+   * Save or update a deck recipe (enforces MAX_RECIPES limit on new recipes).
+   */
+  async function saveRecipe(recipe) {
+    const db = getDB();
+    const maxRecipes = (root.YgoTower.Constants && root.YgoTower.Constants.MAX_RECIPES) || 20;
+    const now = new Date().toISOString();
+
+    const record = {
+      ...recipe,
+      name: String(recipe.name || 'Untitled Recipe').trim() || 'Untitled Recipe',
+      main: Array.isArray(recipe.main) ? recipe.main : [],
+      extra: Array.isArray(recipe.extra) ? recipe.extra : [],
+      side: Array.isArray(recipe.side) ? recipe.side : [],
+      updatedAt: now,
+    };
+
+    if (record.id) {
+      await db.recipes.put(record);
+      return record.id;
+    }
+
+    const currentCount = await db.recipes.count();
+    if (currentCount >= maxRecipes) {
+      throw new Error(`บันทึก Recipe ได้สูงสุด ${maxRecipes} Deck กรุณาลบ Deck เดิมก่อน`);
+    }
+
+    record.createdAt = now;
+    const id = await db.recipes.add(record);
+    record.id = id;
+    return id;
+  }
+
+  /**
+   * Delete a saved deck recipe by ID.
+   */
+  async function deleteRecipe(id) {
+    const db = getDB();
+    await db.recipes.delete(id);
+  }
+
   root.YgoTower.DB = {
     getDB,
     getSettings,
     saveSettings,
     getActiveSeason,
     saveSeason,
+    getRecipes,
+    saveRecipe,
+    deleteRecipe,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

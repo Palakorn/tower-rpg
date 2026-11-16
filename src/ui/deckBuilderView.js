@@ -44,21 +44,51 @@
 
     const validation = Ydk.validateDeck(deck, collection, cardMap);
 
-    const filteredOwned = ownedIds
-      .map((id) => ({ id, card: cardMap.get(id), owned: collection[String(id)] }))
-      .filter((item) => item.card.name.toLowerCase().includes(searchQuery.toLowerCase()) || String(item.id).includes(searchQuery))
-      .slice(0, 60);
+    const buildCollectionHtml = () => {
+      const q = searchQuery.toLowerCase();
+      const filteredOwned = ownedIds
+        .map((id) => ({ id, card: cardMap.get(id), owned: collection[String(id)] }))
+        .filter((item) => item.card.name.toLowerCase().includes(q) || String(item.id).includes(searchQuery))
+        .slice(0, 60);
+
+      return filteredOwned.length
+        ? filteredOwned
+            .map(({ id, card, owned }) => {
+              const used = usedCounts.get(id) || 0;
+              const maxAllowed = Math.min(3, owned);
+              const canAdd = used < maxAllowed;
+              return `
+                <div class="ygo-card-tile">
+                  <img src="${App.escapeHtml(card.image_url || '')}" alt="${App.escapeHtml(card.name)}" loading="lazy" />
+                  <strong>${App.escapeHtml(card.name)}</strong>
+                  <div class="muted">มี ${owned} ใบ • ใช้ ${used}/${maxAllowed}</div>
+                  <div style="display:flex; gap:4px; margin-top:auto;">
+                    <button class="btn btn-sm btn-primary" data-add-card="auto:${id}" ${canAdd ? '' : 'disabled'}>+ Deck</button>
+                    <button class="btn btn-sm" data-add-card="side:${id}" ${canAdd ? '' : 'disabled'}>+ Side</button>
+                  </div>
+                </div>
+              `;
+            })
+            .join('')
+        : `<p class="muted">ไม่พบการ์ดในคลัง (เปิดซองหรือ Import Starter .ydk เพื่อเพิ่มการ์ดเข้าคลัง)</p>`;
+    };
 
     const renderDeckZone = (title, zoneKey, ids) => {
       const counts = new Map();
       for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
       const rows = Array.from(counts.entries())
         .map(([id, cnt]) => {
-          const c = cardMap.get(id) || { name: `Card #${id}` };
+          const c = cardMap.get(id) || { name: `Card #${id}`, image_url: '' };
+          const thumbHtml = c.image_url
+            ? `<img class="deck-card-thumb" src="${App.escapeHtml(c.image_url)}" alt="${App.escapeHtml(c.name)}" loading="lazy" />`
+            : `<div class="deck-card-thumb" aria-hidden="true"></div>`;
           return `
-            <div class="floor-item" style="padding:6px 10px; margin-bottom:4px;">
-              <span><strong>${cnt}x</strong> ${App.escapeHtml(c.name)}</span>
-              <button class="btn btn-sm btn-danger" data-remove-card="${zoneKey}:${id}">-</button>
+            <div class="floor-item deck-card-row">
+              <span class="deck-card-info" title="${App.escapeHtml(c.name)}">
+                ${thumbHtml}
+                <span class="deck-card-name"><strong>${cnt}x</strong> ${App.escapeHtml(c.name)}</span>
+              </span>
+              <button class="btn btn-sm btn-danger" style="flex-shrink:0;" data-remove-card="${zoneKey}:${id}">-</button>
             </div>
           `;
         })
@@ -70,27 +100,6 @@
         </div>
       `;
     };
-
-    const collectionHtml = filteredOwned.length
-      ? filteredOwned
-          .map(({ id, card, owned }) => {
-            const used = usedCounts.get(id) || 0;
-            const maxAllowed = Math.min(3, owned);
-            const canAdd = used < maxAllowed;
-            return `
-              <div class="ygo-card-tile">
-                <img src="${App.escapeHtml(card.image_url || '')}" alt="${App.escapeHtml(card.name)}" loading="lazy" />
-                <strong>${App.escapeHtml(card.name)}</strong>
-                <div class="muted">มี ${owned} ใบ • ใช้ ${used}/${maxAllowed}</div>
-                <div style="display:flex; gap:4px; margin-top:auto;">
-                  <button class="btn btn-sm btn-primary" data-add-card="auto:${id}" ${canAdd ? '' : 'disabled'}>+ Deck</button>
-                  <button class="btn btn-sm" data-add-card="side:${id}" ${canAdd ? '' : 'disabled'}>+ Side</button>
-                </div>
-              </div>
-            `;
-          })
-          .join('')
-      : `<p class="muted">ไม่พบการ์ดในคลัง (เปิดซองหรือ Import Starter .ydk เพื่อเพิ่มการ์ดเข้าคลัง)</p>`;
 
     container.innerHTML = `
       <div class="grid-2" style="grid-template-columns: 340px 1fr;">
@@ -117,33 +126,39 @@
               <span>📚 คลังการ์ดของคุณ (${ownedIds.length} แบบ)</span>
             </h3>
             <input type="text" id="deckCardSearch" value="${App.escapeHtml(searchQuery)}" placeholder="ค้นหาชื่อการ์ดหรือรหัสการ์ดในคลัง..." style="width:100%; margin-bottom:12px;" />
-            <div class="cards-grid">${collectionHtml}</div>
+            <div class="cards-grid" id="deckCollectionGrid"></div>
           </div>
         </div>
       </div>
     `;
 
+    const collectionGrid = document.getElementById('deckCollectionGrid');
+    const renderCollectionGrid = () => {
+      collectionGrid.innerHTML = buildCollectionHtml();
+      collectionGrid.querySelectorAll('[data-add-card]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const [mode, idStr] = btn.dataset.addCard.split(':');
+          const id = Number(idStr);
+          const card = cardMap.get(id);
+          const zone = mode === 'side' ? 'side' : isExtraDeckCard(card) ? 'extra' : 'main';
+          deck[zone].push(id);
+          await DB.saveSeason(season);
+          renderDeckBuilderView(container, state);
+        });
+      });
+    };
+
+    renderCollectionGrid();
+
     document.getElementById('deckCardSearch').addEventListener('input', (e) => {
       searchQuery = e.target.value;
-      renderDeckBuilderView(container, state);
+      renderCollectionGrid();
     });
 
     document.getElementById('exportPlayerYdkBtn').addEventListener('click', () => {
       const ydkText = Ydk.generateYdk(deck);
       const safeName = season.name.replace(/[^a-z0-9ก-๙_-]/gi, '_');
       root.YgoTower.SaveManager.downloadFile(`${safeName}_deck.ydk`, ydkText, 'text/plain');
-    });
-
-    container.querySelectorAll('[data-add-card]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const [mode, idStr] = btn.dataset.addCard.split(':');
-        const id = Number(idStr);
-        const card = cardMap.get(id);
-        const zone = mode === 'side' ? 'side' : isExtraDeckCard(card) ? 'extra' : 'main';
-        deck[zone].push(id);
-        await DB.saveSeason(season);
-        renderDeckBuilderView(container, state);
-      });
     });
 
     container.querySelectorAll('[data-remove-card]').forEach((btn) => {

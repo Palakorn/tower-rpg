@@ -83,6 +83,7 @@
       tower: views.renderTowerView,
       shop: views.renderShopView,
       deck: views.renderDeckBuilderView,
+      recipes: views.renderRecipesView,
       roster: views.renderRosterView,
       hof: views.renderHallOfFameView,
       settings: views.renderSettingsView,

@@ -285,6 +285,8 @@
     BOSS: 'boss',
   };
 
+  const MAX_RECIPES = 20;
+
   return {
     CURATED_MAPPING_VERSION,
     FLOORS,
@@ -294,5 +296,6 @@
     getPackImageUrl,
     DEFAULT_SETTINGS,
     ROLES,
+    MAX_RECIPES,
   };
 });
