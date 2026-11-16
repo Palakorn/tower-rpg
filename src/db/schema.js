@@ -21,6 +21,13 @@
       settings: 'id',
       hallOfFame: '++id, seasonName, completedAt',
     });
+    // Rebuild sets store with set_name as primary key so editions sharing set_code (e.g. LOB & LOB 25th) coexist.
+    db.version(2).stores({
+      sets: null,
+    });
+    db.version(3).stores({
+      sets: 'set_name, set_code, tcg_date, assignedFloor',
+    });
 
     dbInstance = db;
     return dbInstance;

@@ -34,7 +34,7 @@
    */
   function filterAndMapCuratedSets(rawSets, existingSets = [], preserveFloor = false) {
     const Constants = root.YgoTower.Constants;
-    const existingMap = new Map(existingSets.map((s) => [s.set_code, s]));
+    const existingMap = new Map(existingSets.map((s) => [Constants.normalizeSetName(s.set_name), s]));
 
     const mapped = [];
     for (const s of rawSets) {
@@ -42,7 +42,7 @@
       const curated = Constants.findCuratedPack(s);
       if (!curated) continue;
 
-      const prev = existingMap.get(s.set_code);
+      const prev = existingMap.get(Constants.normalizeSetName(s.set_name));
       mapped.push({
         set_code: s.set_code,
         set_name: s.set_name,
@@ -68,25 +68,29 @@
     const Constants = root.YgoTower.Constants;
     const db = root.YgoTower.DB.getDB();
     const existingSets = await db.sets.toArray();
-    if (!existingSets.length) return false;
+    if (!existingSets.length) {
+      const cardsCount = await db.cards.count();
+      if (!cardsCount) return false;
+    }
 
     const targetVersion = String(Constants.CURATED_MAPPING_VERSION || 1);
     const savedVersion =
       typeof localStorage !== 'undefined' ? localStorage.getItem(MAPPING_VERSION_KEY) : null;
 
     const needsMigration =
+      !existingSets.length ||
       savedVersion !== targetVersion ||
       existingSets.length !== Constants.CURATED_PACKS.length ||
       existingSets.some((s) => !Constants.findCuratedPack(s) || !s.set_image);
 
     if (!needsMigration) return false;
 
-    const existingMap = new Map(existingSets.map((s) => [s.set_code.toUpperCase(), s]));
+    const existingMap = new Map(existingSets.map((s) => [Constants.normalizeSetName(s.set_name), s]));
     const migrated = Constants.CURATED_PACKS.map((curated) => {
-      const prev = existingMap.get(curated.set_code.toUpperCase());
+      const prev = existingMap.get(Constants.normalizeSetName(curated.set_name));
       return {
         set_code: prev?.set_code || curated.set_code,
-        set_name: prev?.set_name || curated.set_name,
+        set_name: curated.set_name,
         num_of_cards: prev?.num_of_cards || 0,
         tcg_date: prev?.tcg_date || curated.tcg_date,
         set_image: prev?.set_image || Constants.getPackImageUrl(curated),

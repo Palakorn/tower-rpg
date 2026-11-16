@@ -7,7 +7,7 @@
     root.YgoTower.Constants = exported;
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
-  const CURATED_MAPPING_VERSION = 2;
+  const CURATED_MAPPING_VERSION = 3;
 
   const FLOORS = [
     {
@@ -104,17 +104,22 @@
   ];
 
   const CURATED_PACKS = [
-    // Floor 1: GBC / Dark Duel Stories — DM Part 1 (6 packs: 2002 - mid 2003)
+    // Floor 1: GBC / Dark Duel Stories — DM Part 1 (6 original packs + 25th Anniversary Editions)
     { floor: 1, set_code: 'LOB', set_name: 'Legend of Blue Eyes White Dragon', tcg_date: '2002-03-08' },
+    { floor: 1, set_code: 'LOB', set_name: 'Legend of Blue Eyes White Dragon (25th Anniversary Edition)', tcg_date: '2023-04-20' },
     { floor: 1, set_code: 'MRD', set_name: 'Metal Raiders', tcg_date: '2002-06-26' },
+    { floor: 1, set_code: 'MRD', set_name: 'Metal Raiders (25th Anniversary Edition)', tcg_date: '2023-04-20' },
     { floor: 1, set_code: 'SRL', set_name: 'Spell Ruler', tcg_date: '2002-09-16' },
+    { floor: 1, set_code: 'SRL', set_name: 'Spell Ruler (25th Anniversary Edition)', tcg_date: '2023-04-20' },
     { floor: 1, set_code: 'PSV', set_name: "Pharaoh's Servant", tcg_date: '2002-10-20' },
+    { floor: 1, set_code: 'PSV', set_name: "Pharaoh's Servant (25th Anniversary Edition)", tcg_date: '2023-04-20' },
     { floor: 1, set_code: 'LON', set_name: 'Labyrinth of Nightmare', tcg_date: '2003-03-01' },
     { floor: 1, set_code: 'LOD', set_name: 'Legacy of Darkness', tcg_date: '2003-06-06' },
-    // Floor 2: Yu-Gi-Oh! Duel Monsters (DM) — Part 2 (7 packs: mid 2003 - 2004)
+    // Floor 2: Yu-Gi-Oh! Duel Monsters (DM) — Part 2 (7 original packs + 25th Anniversary Edition)
     { floor: 2, set_code: 'PGD', set_name: 'Pharaonic Guardian', tcg_date: '2003-07-18' },
     { floor: 2, set_code: 'MFC', set_name: "Magician's Force", tcg_date: '2003-10-10' },
     { floor: 2, set_code: 'DCR', set_name: 'Dark Crisis', tcg_date: '2003-12-01' },
+    { floor: 2, set_code: 'DCR', set_name: 'Dark Crisis (25th Anniversary Edition)', tcg_date: '2023-04-20' },
     { floor: 2, set_code: 'IOC', set_name: 'Invasion of Chaos', tcg_date: '2004-03-01' },
     { floor: 2, set_code: 'AST', set_name: 'Ancient Sanctuary', tcg_date: '2004-06-01' },
     { floor: 2, set_code: 'SOD', set_name: 'Soul of the Duelist', tcg_date: '2004-10-01' },
@@ -224,9 +229,10 @@
 
   function findCuratedPack(set) {
     if (!set) return null;
-    const byCode = set.set_code ? CURATED_BY_CODE.get(String(set.set_code).toUpperCase()) : null;
-    if (byCode) return byCode;
-    return set.set_name ? CURATED_BY_NAME.get(normalizeSetName(set.set_name)) || null : null;
+    if (set.set_name) {
+      return CURATED_BY_NAME.get(normalizeSetName(set.set_name)) || null;
+    }
+    return set.set_code ? CURATED_BY_CODE.get(String(set.set_code).toUpperCase()) || null : null;
   }
 
   function getPackImageUrl(set) {
@@ -283,6 +289,7 @@
     CURATED_MAPPING_VERSION,
     FLOORS,
     CURATED_PACKS,
+    normalizeSetName,
     findCuratedPack,
     getPackImageUrl,
     DEFAULT_SETTINGS,

@@ -173,14 +173,14 @@
                 </td>
                 <td class="muted">${App.escapeHtml(s.tcg_date || '-')}</td>
                 <td>
-                  <select data-set-floor="${App.escapeHtml(s.set_code)}">
+                  <select data-set-floor="${App.escapeHtml(s.set_name)}">
                     ${[1, 2, 3, 4, 5, 6, 7]
                       .map((fl) => `<option value="${fl}" ${Number(s.assignedFloor) === fl ? 'selected' : ''}>ชั้น ${fl}</option>`)
                       .join('')}
                   </select>
                 </td>
                 <td>
-                  <select data-set-tpl="${App.escapeHtml(s.set_code)}">
+                  <select data-set-tpl="${App.escapeHtml(s.set_name)}">
                     <option value="tcg" ${s.templateType === 'tcg' ? 'selected' : ''}>TCG (9 ใบ)</option>
                     <option value="ocg" ${s.templateType === 'ocg' ? 'selected' : ''}>OCG (5 ใบ)</option>
                   </select>
@@ -195,7 +195,7 @@
 
       listEl.querySelectorAll('[data-set-floor]').forEach((sel) => {
         sel.addEventListener('change', async () => {
-          const item = allSets.find((x) => x.set_code === sel.dataset.setFloor);
+          const item = allSets.find((x) => x.set_name === sel.dataset.setFloor);
           if (item) {
             item.assignedFloor = Number(sel.value);
             await db.sets.put(item);
@@ -206,7 +206,7 @@
 
       listEl.querySelectorAll('[data-set-tpl]').forEach((sel) => {
         sel.addEventListener('change', async () => {
-          const item = allSets.find((x) => x.set_code === sel.dataset.setTpl);
+          const item = allSets.find((x) => x.set_name === sel.dataset.setTpl);
           if (item) {
             item.templateType = sel.value;
             await db.sets.put(item);
