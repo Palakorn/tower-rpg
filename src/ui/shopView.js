@@ -12,6 +12,187 @@
     }
   }
 
+  const RARITY_GROUPS = [
+    { key: 'secret', shortLabel: 'Secret', label: 'Secret / Starlight / Prismatic' },
+    { key: 'ultra', shortLabel: 'Ultra', label: 'Ultra / Ultimate / Ghost / Gold' },
+    { key: 'super', shortLabel: 'Super', label: 'Super Rare' },
+    { key: 'rare', shortLabel: 'Rare', label: 'Rare' },
+    { key: 'common', shortLabel: 'Common', label: 'Common' },
+  ];
+
+  function renderCardDetailView(setMeta, item, bucket, season, onBackToPack) {
+    const App = root.YgoTower.App;
+    const { card, setEntry } = item;
+    const owned = (season.collection && season.collection[String(card.id)]) || 0;
+
+    const statPills = [];
+    if (card.type) statPills.push(`<span class="badge">${App.escapeHtml(card.type)}</span>`);
+    if (card.attribute) statPills.push(`<span class="badge">${App.escapeHtml(card.attribute)}</span>`);
+    if (card.race) statPills.push(`<span class="badge">${App.escapeHtml(card.race)}</span>`);
+    if (card.level !== null && card.level !== undefined) {
+      statPills.push(`<span class="badge">LV/Rank ${card.level}</span>`);
+    }
+    if (card.atk !== null && card.atk !== undefined) {
+      statPills.push(`<span class="badge">ATK ${card.atk}</span>`);
+    }
+    if (card.def !== null && card.def !== undefined) {
+      statPills.push(`<span class="badge">DEF ${card.def}</span>`);
+    }
+
+    App.openModal(`
+      <div class="pack-detail-modal">
+        <div class="form-row" style="justify-content:space-between; margin-bottom:12px;">
+          <button class="btn btn-sm" id="backToPackListBtn">← กลับไปรายการการ์ดในซอง</button>
+          <button class="btn btn-sm" id="closeCardDetailBtn">ปิด</button>
+        </div>
+        <div class="card-detail-layout">
+          <img class="card-detail-img" src="${App.escapeHtml(card.image_url || '')}" alt="${App.escapeHtml(card.name)}" />
+          <div>
+            <h3 style="margin:0 0 6px;">${App.escapeHtml(card.name)}</h3>
+            <div class="card-detail-meta">
+              <span class="badge badge-${bucket}">${App.escapeHtml(setEntry?.set_rarity || bucket)}</span>
+              ${setEntry?.set_code ? `<span class="badge">${App.escapeHtml(setEntry.set_code)}</span>` : ''}
+              <span class="badge">มีในคลัง: ${owned} ใบ</span>
+            </div>
+            <div class="card-detail-meta">${statPills.join('')}</div>
+            <div class="card-detail-desc">${App.escapeHtml(card.desc || 'ไม่มีคำอธิบาย')}</div>
+          </div>
+        </div>
+      </div>
+    `);
+
+    document.getElementById('backToPackListBtn').addEventListener('click', onBackToPack);
+    document.getElementById('closeCardDetailBtn').addEventListener('click', () => App.closeModal());
+  }
+
+  async function showPackDetailsModal(setMeta, season, onBack = null) {
+    const App = root.YgoTower.App;
+    const Constants = root.YgoTower.Constants;
+    const Api = root.YgoTower.Api;
+    const PackSim = root.YgoTower.PackSimulator;
+
+    const setCards = await Api.getCardsInSet(setMeta.set_name);
+    if (!setCards.length) {
+      App.showToast('ไม่พบข้อมูลการ์ดของซองนี้ในแคช');
+      return;
+    }
+
+    const buckets = PackSim.groupByRarity(setCards);
+    let activeRarity = 'all';
+    let searchQuery = '';
+
+    const renderPackContents = () => {
+      const q = searchQuery.trim().toLowerCase();
+      const visibleGroups = RARITY_GROUPS.filter((g) => activeRarity === 'all' || activeRarity === g.key);
+
+      const sectionsHtml = visibleGroups
+        .map((g) => {
+          const items = (buckets[g.key] || [])
+            .filter((item) => !q || item.card.name.toLowerCase().includes(q))
+            .slice()
+            .sort((a, b) => a.card.name.localeCompare(b.card.name));
+
+          if (!items.length) return '';
+
+          const tilesHtml = items
+            .map((item) => {
+              const owned = (season.collection && season.collection[String(item.card.id)]) || 0;
+              return `
+                <div class="ygo-card-tile clickable" data-card-id="${item.card.id}" data-bucket="${g.key}">
+                  <img src="${App.escapeHtml(item.card.image_url || '')}" alt="${App.escapeHtml(item.card.name)}" loading="lazy" />
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; flex-wrap:wrap;">
+                    <span class="badge badge-${g.key}">${App.escapeHtml(item.setEntry?.set_rarity || g.shortLabel)}</span>
+                    ${owned > 0 ? `<span class="muted">x${owned}</span>` : ''}
+                  </div>
+                  <strong>${App.escapeHtml(item.card.name)}</strong>
+                  ${item.setEntry?.set_code ? `<span class="muted">${App.escapeHtml(item.setEntry.set_code)}</span>` : ''}
+                </div>
+              `;
+            })
+            .join('');
+
+          return `
+            <div class="rarity-section">
+              <div class="rarity-section-header">
+                <span class="badge badge-${g.key}">${App.escapeHtml(g.label)}</span>
+                <span class="muted">${items.length} ใบ</span>
+              </div>
+              <div class="cards-grid">${tilesHtml}</div>
+            </div>
+          `;
+        })
+        .join('');
+
+      const tabsHtml = [
+        `<button class="btn btn-sm ${activeRarity === 'all' ? 'btn-primary' : ''}" data-rarity-tab="all">ทั้งหมด (${setCards.length})</button>`,
+        ...RARITY_GROUPS.map((g) => {
+          const count = (buckets[g.key] || []).length;
+          return `
+            <button class="btn btn-sm ${activeRarity === g.key ? 'btn-primary' : ''}" data-rarity-tab="${g.key}" ${count === 0 ? 'disabled' : ''}>
+              ${g.shortLabel} (${count})
+            </button>
+          `;
+        }),
+      ].join('');
+
+      App.openModal(`
+        <div class="pack-detail-modal">
+          <div class="pack-detail-header">
+            <img class="pack-thumb-sm" src="${App.escapeHtml(Constants.getPackImageUrl(setMeta))}" alt="${App.escapeHtml(setMeta.set_name)}" />
+            <div style="min-width:0; flex:1;">
+              <h3 style="margin:0;">📦 ${App.escapeHtml(setMeta.set_name)}</h3>
+              <div class="muted">${App.escapeHtml(setMeta.set_code || '')} • ${setCards.length} ใบ • คลิกที่การ์ดเพื่อดูรายละเอียด</div>
+            </div>
+            ${onBack ? `<button class="btn btn-sm" id="packDetailBackBtn">← กลับ</button>` : ''}
+            <button class="btn btn-sm" id="closePackDetailBtn">ปิด</button>
+          </div>
+          <div class="form-row" style="margin-bottom:10px;">${tabsHtml}</div>
+          <input type="text" id="packCardSearchInput" value="${App.escapeHtml(searchQuery)}" placeholder="ค้นหาชื่อการ์ดในซอง..." style="width:100%; margin-bottom:12px;" />
+          <div class="pack-detail-scroll" id="packDetailScroll">
+            ${sectionsHtml || '<p class="muted">ไม่พบการ์ดที่ตรงกับเงื่อนไข</p>'}
+          </div>
+        </div>
+      `);
+
+      document.getElementById('closePackDetailBtn').addEventListener('click', () => App.closeModal());
+      const backBtn = document.getElementById('packDetailBackBtn');
+      if (backBtn && onBack) {
+        backBtn.addEventListener('click', onBack);
+      }
+
+      document.querySelectorAll('[data-rarity-tab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          activeRarity = btn.dataset.rarityTab;
+          renderPackContents();
+        });
+      });
+
+      const searchInput = document.getElementById('packCardSearchInput');
+      searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value;
+        const pos = e.target.selectionStart;
+        renderPackContents();
+        const nextInput = document.getElementById('packCardSearchInput');
+        if (nextInput) {
+          nextInput.focus();
+          if (typeof pos === 'number') nextInput.setSelectionRange(pos, pos);
+        }
+      });
+
+      document.querySelectorAll('#packDetailScroll [data-card-id]').forEach((tile) => {
+        tile.addEventListener('click', () => {
+          const cardId = Number(tile.dataset.cardId);
+          const bucket = tile.dataset.bucket;
+          const item = (buckets[bucket] || []).find((entry) => entry.card.id === cardId);
+          if (!item) return;
+          renderCardDetailView(setMeta, item, bucket, season, renderPackContents);
+        });
+      });
+    };
+
+    renderPackContents();
+  }
+
   function showPackResultModal(setName, pulledItems) {
     const App = root.YgoTower.App;
     const cardsHtml = pulledItems
@@ -70,7 +251,10 @@
                   <div class="muted">${App.escapeHtml(s.set_code)} • ชั้น ${s.assignedFloor} • ${(s.templateType || 'tcg').toUpperCase()}</div>
                 </div>
               </div>
-              <button class="btn btn-sm btn-gold" data-pick-free-pack="${App.escapeHtml(s.set_name)}">เปิดฟรี</button>
+              <div style="display:flex; gap:6px; flex-shrink:0;">
+                <button class="btn btn-sm" data-inspect-free-pack="${App.escapeHtml(s.set_name)}">ดูการ์ด</button>
+                <button class="btn btn-sm btn-gold" data-pick-free-pack="${App.escapeHtml(s.set_name)}">เปิดฟรี</button>
+              </div>
             </div>
           `
           )
@@ -86,6 +270,14 @@
 
       const listEl = document.getElementById('eventPackList');
       const bindButtons = () => {
+        listEl.querySelectorAll('[data-inspect-free-pack]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const setMeta = eligibleSets.find((s) => s.set_name === btn.dataset.inspectFreePack);
+            if (!setMeta) return;
+            showPackDetailsModal(setMeta, season, () => openEventModal(eventIndex, season, settings));
+          });
+        });
+
         listEl.querySelectorAll('[data-pick-free-pack]').forEach((btn) => {
           btn.addEventListener('click', async () => {
             const setName = btn.dataset.pickFreePack;
@@ -246,13 +438,21 @@
             </div>
             <strong>${App.escapeHtml(s.set_name)}</strong>
             <div class="muted">รหัส: ${App.escapeHtml(s.set_code)} • ราคา ${eco.packPrice} DP</div>
-            <button
-              class="btn btn-sm btn-gold"
-              data-buy-pack="${App.escapeHtml(s.set_name)}"
-              ${isUnlocked && season.dp >= eco.packPrice ? '' : 'disabled'}
-            >
-              ${isUnlocked ? `ซื้อ &amp; เปิด (${eco.packPrice} DP)` : '🔒 ยังไม่ปลดล็อก'}
-            </button>
+            <div class="pack-actions">
+              <button
+                class="btn btn-sm"
+                data-view-pack="${App.escapeHtml(s.set_name)}"
+              >
+                🔍 ดูการ์ด
+              </button>
+              <button
+                class="btn btn-sm btn-gold"
+                data-buy-pack="${App.escapeHtml(s.set_name)}"
+                ${isUnlocked && season.dp >= eco.packPrice ? '' : 'disabled'}
+              >
+                ${isUnlocked ? `ซื้อ (${eco.packPrice} DP)` : '🔒 ล็อก'}
+              </button>
+            </div>
           </div>
         `
           )
@@ -286,6 +486,14 @@
       btn.addEventListener('click', () => {
         selectedShopFloor = Number(btn.dataset.shopFloor);
         renderShopView(container, state);
+      });
+    });
+
+    container.querySelectorAll('[data-view-pack]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const setMeta = floorSets.find((s) => s.set_name === btn.dataset.viewPack);
+        if (!setMeta) return;
+        showPackDetailsModal(setMeta, season);
       });
     });
 

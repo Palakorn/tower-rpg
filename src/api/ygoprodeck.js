@@ -103,6 +103,33 @@
     return true;
   }
 
+  function toCompactCard(c, altImage = null) {
+    return {
+      id: altImage ? altImage.id : c.id,
+      canonicalId: c.id,
+      name: c.name,
+      type: c.type || '',
+      frameType: c.frameType || '',
+      desc: c.desc || '',
+      race: c.race || '',
+      attribute: c.attribute || '',
+      atk: c.atk ?? null,
+      def: c.def ?? null,
+      level: c.level ?? null,
+      card_sets: altImage
+        ? []
+        : (c.card_sets || []).map((cs) => ({
+            set_name: cs.set_name,
+            set_code: cs.set_code,
+            set_rarity: cs.set_rarity || 'Common',
+            set_rarity_code: cs.set_rarity_code || '(C)',
+          })),
+      image_url:
+        (altImage && altImage.image_url_small) ||
+        (c.card_images && c.card_images[0] ? c.card_images[0].image_url_small : ''),
+    };
+  }
+
   /**
    * Fetch curated card sets and cards from YGOPRODeck API and cache in IndexedDB.
    */
@@ -139,25 +166,17 @@
     const rawCards = cardsJson.data || [];
 
     report(`กำลังจัดเตรียมข้อมูลการ์ด ${rawCards.length} ใบ...`, 70);
-    const compactCards = rawCards.map((c) => ({
-      id: c.id,
-      name: c.name,
-      type: c.type || '',
-      frameType: c.frameType || '',
-      desc: c.desc || '',
-      race: c.race || '',
-      attribute: c.attribute || '',
-      atk: c.atk ?? null,
-      def: c.def ?? null,
-      level: c.level ?? null,
-      card_sets: (c.card_sets || []).map((cs) => ({
-        set_name: cs.set_name,
-        set_code: cs.set_code,
-        set_rarity: cs.set_rarity || 'Common',
-        set_rarity_code: cs.set_rarity_code || '(C)',
-      })),
-      image_url: c.card_images && c.card_images[0] ? c.card_images[0].image_url_small : '',
-    }));
+    const compactCards = [];
+    for (const c of rawCards) {
+      compactCards.push(toCompactCard(c));
+      if (Array.isArray(c.card_images)) {
+        for (const img of c.card_images) {
+          if (img && img.id && img.id !== c.id) {
+            compactCards.push(toCompactCard(c, img));
+          }
+        }
+      }
+    }
 
     // Write in chunks to keep UI responsive
     const CHUNK_SIZE = 2000;
@@ -201,10 +220,70 @@
     return result;
   }
 
+  /**
+   * Resolve card metadata by IDs (supporting alternate-art IDs via on-demand API fallback & caching).
+   */
+  async function getCardsByIds(ids) {
+    const db = root.YgoTower.DB.getDB();
+    const uniqueIds = Array.from(
+      new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))
+    );
+    const cardMap = new Map();
+    if (!uniqueIds.length) return cardMap;
+
+    const cached = await db.cards.bulkGet(uniqueIds);
+    const missingIds = [];
+    for (let i = 0; i < uniqueIds.length; i++) {
+      if (cached[i]) {
+        cardMap.set(uniqueIds[i], cached[i]);
+      } else {
+        missingIds.push(uniqueIds[i]);
+      }
+    }
+
+    if (missingIds.length > 0) {
+      const missingSet = new Set(missingIds);
+      const toCache = [];
+      const CHUNK = 50;
+      for (let i = 0; i < missingIds.length; i += CHUNK) {
+        const chunk = missingIds.slice(i, i + CHUNK);
+        try {
+          const res = await fetch(`${API_BASE}/cardinfo.php?id=${chunk.join(',')}`);
+          if (!res.ok) continue;
+          const json = await res.json();
+          for (const c of json.data || []) {
+            if (missingSet.has(c.id)) {
+              const entry = toCompactCard(c);
+              cardMap.set(c.id, entry);
+              toCache.push(entry);
+            }
+            if (Array.isArray(c.card_images)) {
+              for (const img of c.card_images) {
+                if (img && img.id && img.id !== c.id && missingSet.has(img.id)) {
+                  const altEntry = toCompactCard(c, img);
+                  cardMap.set(img.id, altEntry);
+                  toCache.push(altEntry);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('On-demand card fetch failed:', err);
+        }
+      }
+      if (toCache.length > 0) {
+        await db.cards.bulkPut(toCache);
+      }
+    }
+
+    return cardMap;
+  }
+
   root.YgoTower.Api = {
     syncFromApi,
     getCacheStats,
     getCardsInSet,
+    getCardsByIds,
     assignFloorByDate,
     filterAndMapCuratedSets,
     migrateCachedSetsIfNeeded,

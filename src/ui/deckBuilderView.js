@@ -12,8 +12,8 @@
   async function renderDeckBuilderView(container, state) {
     const App = root.YgoTower.App;
     const DB = root.YgoTower.DB;
+    const Api = root.YgoTower.Api;
     const Ydk = root.YgoTower.Ydk;
-    const db = DB.getDB();
 
     const season = state.activeSeason;
     if (!season) {
@@ -27,15 +27,16 @@
       .map((k) => Number(k))
       .filter((id) => collection[String(id)] > 0);
 
-    const cachedCards = ownedIds.length ? await db.cards.bulkGet(ownedIds) : [];
+    const deck = season.playerDeck;
+    const allIds = [...ownedIds, ...deck.main, ...deck.extra, ...deck.side];
+    const resolvedMap = await Api.getCardsByIds(allIds);
     const cardMap = new Map();
-    for (let i = 0; i < ownedIds.length; i++) {
-      const id = ownedIds[i];
-      const info = cachedCards[i] || { id, name: `Card #${id}`, type: '', frameType: '', image_url: '' };
-      cardMap.set(id, info);
+    for (const id of allIds) {
+      if (!cardMap.has(id)) {
+        cardMap.set(id, resolvedMap.get(id) || { id, name: `Card #${id}`, type: '', frameType: '', image_url: '' });
+      }
     }
 
-    const deck = season.playerDeck;
     const usedCounts = new Map();
     for (const id of [...deck.main, ...deck.extra, ...deck.side]) {
       usedCounts.set(id, (usedCounts.get(id) || 0) + 1);

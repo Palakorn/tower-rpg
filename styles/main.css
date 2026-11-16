@@ -410,3 +410,97 @@ th, td {
   padding: 8px;
   border-bottom: 1px solid var(--border);
 }
+
+.pack-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.pack-actions .btn {
+  margin-top: 0;
+  flex: 1;
+}
+
+.modal-panel:has(.pack-detail-modal) {
+  max-width: 920px;
+}
+
+.pack-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pack-detail-scroll {
+  max-height: 58vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.rarity-section {
+  margin-bottom: 18px;
+}
+
+.rarity-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.ygo-card-tile.clickable {
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.ygo-card-tile.clickable:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.card-detail-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.card-detail-img {
+  width: 100%;
+  border-radius: 8px;
+  background: #0b0d13;
+  border: 1px solid var(--border);
+}
+
+.card-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.card-detail-desc {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .card-detail-layout {
+    grid-template-columns: 1fr;
+  }
+  .card-detail-img {
+    max-width: 220px;
+    margin: 0 auto;
+  }
+}

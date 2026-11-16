@@ -151,6 +151,7 @@
 
   return {
     normalizeRarity,
+    groupByRarity,
     openPack,
     getEventEligibleSets,
   };
