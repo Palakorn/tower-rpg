@@ -47,28 +47,40 @@
   function renderStatusBar() {
     const bar = document.getElementById('statusBar');
     const s = state.activeSeason;
+    const BattleEffects = root.YgoTower.BattleEffects;
+    const muted = BattleEffects ? BattleEffects.isMuted() : false;
+    const soundBtnHtml = `<button type="button" class="sound-toggle-btn" id="soundToggleBtn" title="เปิด/ปิดเสียงเอฟเฟกต์">${muted ? '🔇 ปิดเสียง' : '🔊 เสียง'}</button>`;
+
     if (!s) {
-      bar.innerHTML = `<span class="pill">ยังไม่มี Season ที่กำลังเล่น</span>`;
-      return;
+      bar.innerHTML = `<span class="pill">ยังไม่มี Season ที่กำลังเล่น</span>${soundBtnHtml}`;
+    } else {
+      const pendingCount = (s.pendingEvents || []).length;
+      const eventPill =
+        pendingCount > 0
+          ? `<button class="pill event-ready" id="headerEventBtn">🎁 รางวัล Event รอรับ (${pendingCount})</button>`
+          : `<span class="pill">Event ชนะ: <strong>${s.winCounter || 0}/8</strong> (4=ซอง, 8=เลือกการ์ด)</span>`;
+
+      bar.innerHTML = `
+        <span class="pill">Season: <strong>${escapeHtml(s.name)}</strong></span>
+        <span class="pill">ชั้น: <strong>${s.currentFloor}/7</strong></span>
+        <span class="pill">DP: <strong>${s.dp}</strong></span>
+        ${eventPill}
+        ${soundBtnHtml}
+      `;
+
+      const evBtn = document.getElementById('headerEventBtn');
+      if (evBtn) {
+        evBtn.addEventListener('click', () => {
+          switchTab('shop');
+        });
+      }
     }
 
-    const pendingCount = (s.pendingEvents || []).length;
-    const eventPill =
-      pendingCount > 0
-        ? `<button class="pill event-ready" id="headerEventBtn">🎁 รางวัล Event รอรับ (${pendingCount})</button>`
-        : `<span class="pill">Event ชนะ: <strong>${s.winCounter || 0}/8</strong> (4=ซอง, 8=เลือกการ์ด)</span>`;
-
-    bar.innerHTML = `
-      <span class="pill">Season: <strong>${escapeHtml(s.name)}</strong></span>
-      <span class="pill">ชั้น: <strong>${s.currentFloor}/7</strong></span>
-      <span class="pill">DP: <strong>${s.dp}</strong></span>
-      ${eventPill}
-    `;
-
-    const evBtn = document.getElementById('headerEventBtn');
-    if (evBtn) {
-      evBtn.addEventListener('click', () => {
-        switchTab('shop');
+    const soundBtn = document.getElementById('soundToggleBtn');
+    if (soundBtn && BattleEffects) {
+      soundBtn.addEventListener('click', () => {
+        BattleEffects.toggleMute();
+        renderStatusBar();
       });
     }
   }

@@ -59,6 +59,36 @@
   }
 
   /**
+   * Generate an MDPro4 trunk whitelist (.lflist.conf) string from a card collection.
+   * Limits each card count to 1-3 copies.
+   * @param {Record<string, number>} collection
+   */
+  function generateTrunk(collection) {
+    const header = [
+      '#[Tower RPG]',
+      '!Tower RPG',
+      '$whitelist',
+      '# รูปแบบ: <Card Passcode 8 หลัก> <จำนวนใบที่มีในคลัง 1-3>',
+    ];
+
+    const entries = [];
+    if (collection && typeof collection === 'object') {
+      for (const [rawId, rawCount] of Object.entries(collection)) {
+        const id = parseInt(rawId, 10);
+        const count = Math.floor(Number(rawCount) || 0);
+        if (!Number.isNaN(id) && id > 0 && count > 0) {
+          entries.push([id, Math.min(3, count)]);
+        }
+      }
+    }
+
+    entries.sort((a, b) => a[0] - b[0]);
+    const body = entries.map(([id, count]) => `${id} ${count}`);
+
+    return [...header, ...body, ''].join('\n');
+  }
+
+  /**
    * Count total copies of each card ID in a deck, and add them to a collection map.
    */
   function addDeckToCollection(collection, deck) {
@@ -69,6 +99,84 @@
       next[key] = (next[key] || 0) + 1;
     }
     return next;
+  }
+
+  /**
+   * Collect ownership and 3-copy limit errors for a deck against a collection.
+   * @param {{ main: number[], extra: number[], side: number[] }} deck
+   * @param {Record<string, number>} collection
+   * @param {Map<number, { name: string }>} [cardLookup]
+   */
+  function collectCollectionErrors(deck, collection, cardLookup) {
+    const errors = [];
+    const main = (deck && deck.main) || [];
+    const extra = (deck && deck.extra) || [];
+    const side = (deck && deck.side) || [];
+
+    const idCounts = new Map();
+    const nameCounts = new Map();
+
+    for (const id of [...main, ...extra, ...side]) {
+      idCounts.set(id, (idCounts.get(id) || 0) + 1);
+      if (cardLookup && cardLookup.has(id)) {
+        const name = cardLookup.get(id).name;
+        nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+      }
+    }
+
+    for (const [id, count] of idCounts.entries()) {
+      const owned = (collection && collection[String(id)]) || 0;
+      if (owned <= 0) {
+        const label = cardLookup && cardLookup.has(id) ? cardLookup.get(id).name : `#${id}`;
+        errors.push(`การ์ด ${label} ไม่มีในคลัง (ต้องการ ${count} ใบ)`);
+      } else if (count > owned) {
+        const label = cardLookup && cardLookup.has(id) ? cardLookup.get(id).name : `#${id}`;
+        errors.push(`การ์ด ${label} ใส่ ${count} ใบ เกินจำนวนที่มีในคลัง (${owned} ใบ)`);
+      }
+      if ((!cardLookup || !cardLookup.has(id)) && count > 3) {
+        errors.push(`การ์ด #${id} ใส่เกิน 3 ใบ (${count} ใบ)`);
+      }
+    }
+
+    if (cardLookup) {
+      for (const [name, count] of nameCounts.entries()) {
+        if (count > 3) {
+          errors.push(`การ์ด "${name}" ใส่เกิน 3 ใบ (${count} ใบ)`);
+        }
+      }
+    }
+
+    return errors;
+  }
+
+  /**
+   * Validate an imported deck against collection ownership and 3-copy limit
+   * (without enforcing Main/Extra/Side deck size bounds).
+   * @param {{ main: number[], extra: number[], side: number[] }} deck
+   * @param {Record<string, number>} collection
+   * @param {Map<number, { name: string }>} [cardLookup]
+   */
+  function validateDeckCollection(deck, collection, cardLookup) {
+    const main = (deck && deck.main) || [];
+    const extra = (deck && deck.extra) || [];
+    const side = (deck && deck.side) || [];
+
+    const errors = [];
+    if (main.length + extra.length + side.length === 0) {
+      errors.push('ไม่พบการ์ดในไฟล์ .ydk นี้');
+    } else {
+      errors.push(...collectCollectionErrors(deck, collection, cardLookup));
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      counts: {
+        main: main.length,
+        extra: extra.length,
+        side: side.length,
+      },
+    };
   }
 
   /**
@@ -93,35 +201,7 @@
       errors.push(`Side Deck ต้องไม่เกิน 15 ใบ (ปัจจุบันมี ${side.length} ใบ)`);
     }
 
-    const idCounts = new Map();
-    const nameCounts = new Map();
-
-    for (const id of [...main, ...extra, ...side]) {
-      idCounts.set(id, (idCounts.get(id) || 0) + 1);
-      if (cardLookup && cardLookup.has(id)) {
-        const name = cardLookup.get(id).name;
-        nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
-      }
-    }
-
-    for (const [id, count] of idCounts.entries()) {
-      const owned = (collection && collection[String(id)]) || 0;
-      if (count > owned) {
-        const label = cardLookup && cardLookup.has(id) ? cardLookup.get(id).name : `#${id}`;
-        errors.push(`การ์ด ${label} ใส่ ${count} ใบ เกินจำนวนที่มีในคลัง (${owned} ใบ)`);
-      }
-      if (!cardLookup && count > 3) {
-        errors.push(`การ์ด #${id} ใส่เกิน 3 ใบ (${count} ใบ)`);
-      }
-    }
-
-    if (cardLookup) {
-      for (const [name, count] of nameCounts.entries()) {
-        if (count > 3) {
-          errors.push(`การ์ด "${name}" ใส่เกิน 3 ใบ (${count} ใบ)`);
-        }
-      }
-    }
+    errors.push(...collectCollectionErrors(deck, collection, cardLookup));
 
     return {
       valid: errors.length === 0,
@@ -191,8 +271,10 @@
   return {
     parseYdk,
     generateYdk,
+    generateTrunk,
     addDeckToCollection,
     validateDeck,
+    validateDeckCollection,
     evaluateRecipeAgainstCollection,
   };
 });

@@ -193,8 +193,22 @@
     renderPackContents();
   }
 
-  function showPackResultModal(setName, pulledItems) {
+  function showPackResultModal(setName, pulledItems, setMeta) {
     const App = root.YgoTower.App;
+    const Constants = root.YgoTower.Constants;
+    const PackEffects = root.YgoTower.PackEffects;
+
+    if (PackEffects) {
+      App.closeModal();
+      PackEffects.show({
+        setName,
+        packImageUrl: setMeta ? Constants.getPackImageUrl(setMeta) : '',
+        pulledItems,
+        onDone: () => App.renderCurrentView(),
+      });
+      return;
+    }
+
     const cardsHtml = pulledItems
       .map(
         (p) => `
@@ -291,7 +305,7 @@
             addCardsToCollection(season, pulled);
             season.pendingEvents.splice(eventIndex, 1);
             await DB.saveSeason(season);
-            showPackResultModal(setName, pulled);
+            showPackResultModal(setName, pulled, setMeta);
           });
         });
       };
@@ -337,13 +351,26 @@
         gridEl.querySelectorAll('[data-pick-card-id]').forEach((btn) => {
           btn.addEventListener('click', async () => {
             const cardId = btn.dataset.pickCardId;
+            const pickedCard = eligibleCards.find((c) => String(c.id) === String(cardId));
             season.collection = season.collection || {};
             season.collection[cardId] = (season.collection[cardId] || 0) + 1;
             season.pendingEvents.splice(eventIndex, 1);
             await DB.saveSeason(season);
             App.closeModal();
-            App.showToast('เพิ่มการ์ดรางวัลเข้าคลังเรียบร้อย!');
-            App.renderCurrentView();
+
+            const PackEffects = root.YgoTower.PackEffects;
+            if (PackEffects && typeof PackEffects.showCardPick === 'function' && pickedCard) {
+              PackEffects.showCardPick({
+                card: pickedCard,
+                onDone: () => {
+                  App.showToast('เพิ่มการ์ดรางวัลเข้าคลังเรียบร้อย!');
+                  App.renderCurrentView();
+                },
+              });
+            } else {
+              App.showToast('เพิ่มการ์ดรางวัลเข้าคลังเรียบร้อย!');
+              App.renderCurrentView();
+            }
           });
         });
       };
@@ -514,7 +541,7 @@
         const pulled = PackSim.openPack(setCards, setMeta?.templateType || 'tcg', settings);
         addCardsToCollection(season, pulled);
         await DB.saveSeason(season);
-        showPackResultModal(setName, pulled);
+        showPackResultModal(setName, pulled, setMeta);
       });
     });
   }

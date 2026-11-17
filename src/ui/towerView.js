@@ -272,10 +272,30 @@
         const idx = Number(idxStr);
         const won = outcome === 'win';
         const roster = await db.roster.toArray();
+        const opp = role === 'guard' ? fs.guards[idx] : role === 'miniboss' ? fs.minibosses[idx] : fs.boss;
+        const opponentName = opp ? opp.name : 'คู่ต่อสู้';
+        const floorBefore = season.currentFloor;
 
         try {
           const res = Tower.recordDuelResult(season, role, idx, won, roster, settings);
           await DB.saveSeason(season);
+
+          const bo3Note =
+            role === 'boss' && !res.matchEnded
+              ? `ชนะ ${season.floorState.boss.bo3Wins} - แพ้ ${season.floorState.boss.bo3Losses}`
+              : '';
+
+          if (root.YgoTower.BattleEffects) {
+            root.YgoTower.BattleEffects.show({
+              won,
+              res,
+              opponentName,
+              role,
+              clearedFloor: floorBefore,
+              hasPenalty: Boolean(season.floorState.pendingPenalty),
+              bo3Note,
+            });
+          }
 
           if (res.seasonCompleted) {
             await db.hallOfFame.add({

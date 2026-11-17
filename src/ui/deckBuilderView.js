@@ -107,7 +107,13 @@
           <div class="card">
             <h3 class="card-title">
               <span>📦 Deck ปัจจุบัน</span>
-              <button class="btn btn-sm btn-gold" id="exportPlayerYdkBtn">📥 Export .ydk</button>
+              <span style="display:flex; gap:6px;">
+                <label class="btn btn-sm" style="cursor:pointer;">
+                  📤 Import .ydk
+                  <input type="file" id="importPlayerYdkInput" accept=".ydk" style="display:none;" />
+                </label>
+                <button class="btn btn-sm btn-gold" id="exportPlayerYdkBtn">📥 Export .ydk</button>
+              </span>
             </h3>
             ${
               validation.errors.length
@@ -124,6 +130,7 @@
           <div class="card">
             <h3 class="card-title">
               <span>📚 คลังการ์ดของคุณ (${ownedIds.length} แบบ)</span>
+              <button class="btn btn-sm btn-gold" id="exportTrunkBtn" ${ownedIds.length ? '' : 'disabled'}>📥 Export Trunk (.conf)</button>
             </h3>
             <input type="text" id="deckCardSearch" value="${App.escapeHtml(searchQuery)}" placeholder="ค้นหาชื่อการ์ดหรือรหัสการ์ดในคลัง..." style="width:100%; margin-bottom:12px;" />
             <div class="cards-grid" id="deckCollectionGrid"></div>
@@ -159,6 +166,50 @@
       const ydkText = Ydk.generateYdk(deck);
       const safeName = season.name.replace(/[^a-z0-9ก-๙_-]/gi, '_');
       root.YgoTower.SaveManager.downloadFile(`${safeName}_deck.ydk`, ydkText, 'text/plain');
+    });
+
+    document.getElementById('importPlayerYdkInput').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+
+      const text = await file.text();
+      const importedDeck = Ydk.parseYdk(text);
+      const importedIds = [...new Set([...importedDeck.main, ...importedDeck.extra, ...importedDeck.side])];
+      const importedCardMap = await Api.getCardsByIds(importedIds);
+
+      const check = Ydk.validateDeckCollection(importedDeck, collection, importedCardMap);
+      if (!check.valid) {
+        App.showToast('ไม่สามารถ Import .ydk ได้');
+        App.openModal(`
+          <h3 class="card-title">❌ ไม่สามารถ Import ไฟล์ .ydk ได้</h3>
+          <p class="muted" style="margin-top:0;">พบการ์ดที่ไม่ผ่านเงื่อนไขคลังการ์ด จึงยังคง Deck เดิมไว้:</p>
+          <div class="alert-box danger" style="max-height:280px; overflow-y:auto; font-size:0.86rem;">
+            ${check.errors.map((err) => `<div>• ${App.escapeHtml(err)}</div>`).join('')}
+          </div>
+          <div class="form-row" style="justify-content:flex-end; margin-top:12px;">
+            <button class="btn btn-primary" id="closeImportErrorModalBtn">ปิด</button>
+          </div>
+        `);
+        document.getElementById('closeImportErrorModalBtn').addEventListener('click', () => App.closeModal());
+        return;
+      }
+
+      const currentCount = deck.main.length + deck.extra.length + deck.side.length;
+      if (currentCount > 0 && !window.confirm('Deck ปัจจุบันมีการ์ดอยู่แล้ว ต้องการนำเข้าไฟล์ .ydk เพื่อแทนที่หรือไม่?')) {
+        return;
+      }
+
+      season.playerDeck = importedDeck;
+      await DB.saveSeason(season);
+      App.showToast(`Import .ydk สำเร็จ (Main ${importedDeck.main.length}, Extra ${importedDeck.extra.length}, Side ${importedDeck.side.length})`);
+      renderDeckBuilderView(container, state);
+    });
+
+    document.getElementById('exportTrunkBtn').addEventListener('click', () => {
+      const trunkText = Ydk.generateTrunk(collection);
+      root.YgoTower.SaveManager.downloadFile('edison.lflist.conf', trunkText, 'text/plain;charset=utf-8');
+      App.showToast(`Export edison.lflist.conf สำเร็จ (${ownedIds.length} แบบ)`);
     });
 
     container.querySelectorAll('[data-remove-card]').forEach((btn) => {
