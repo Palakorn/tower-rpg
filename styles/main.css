@@ -337,6 +337,22 @@ input, select, textarea {
   gap: 8px;
 }
 
+.deck-card-row.clickable {
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.deck-card-row.clickable:hover {
+  border-color: var(--primary);
+}
+
+.deck-card-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .deck-card-info {
   display: flex;
   align-items: center;

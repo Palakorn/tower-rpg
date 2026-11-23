@@ -142,11 +142,108 @@
   }
 
   /**
-   * Filter sets eligible for Event 4/8 rewards: current floor + at most 1 floor ahead.
+   * Filter sets eligible for Event rewards.
+   * - 'free_pack' (4 wins): current floor + at most 1 floor ahead.
+   * - 'pick_card' (8 wins): any pack on any floor, regardless of unlock status.
    */
-  function getEventEligibleSets(allSets, currentFloor) {
+  function getEventEligibleSets(allSets, currentFloor, eventType = 'free_pack') {
+    const sets = allSets || [];
+    if (eventType === 'pick_card') {
+      return sets.slice();
+    }
     const maxFloor = Math.min(7, Number(currentFloor) + 1);
-    return (allSets || []).filter((s) => Number(s.assignedFloor) <= maxFloor);
+    return sets.filter((s) => Number(s.assignedFloor) <= maxFloor);
+  }
+
+  /**
+   * Build a map of total owned copies per card name (summing across all artwork IDs).
+   * @param {Array<{ id: number|string, name: string }>} allCards
+   * @param {Record<string, number>} collection
+   */
+  function getOwnedCountsByName(allCards, collection) {
+    const counts = new Map();
+    if (!collection || typeof collection !== 'object') return counts;
+
+    for (const card of allCards || []) {
+      if (!card || !card.name) continue;
+      const owned = Number(collection[String(card.id)] || 0);
+      if (owned > 0) {
+        counts.set(card.name, (counts.get(card.name) || 0) + owned);
+      }
+    }
+    return counts;
+  }
+
+  /**
+   * Get total owned copies for a card, combining name-based count (across artworks) and ID fallback.
+   */
+  function getCardOwnedCount(card, ownedCountsByName, collection) {
+    if (!card) return 0;
+    const byName = ownedCountsByName && card.name ? ownedCountsByName.get(card.name) || 0 : 0;
+    const byId = collection ? Number(collection[String(card.id)] || 0) : 0;
+    return Math.max(byName, byId);
+  }
+
+  /**
+   * Filter cards eligible for the 8-win pick_card reward by floor, set name, and search query.
+   * When both floor and setName are 'all', returns all unique canonical cards from allCards
+   * (including side sets, structure/starter decks, and promos outside curated tower packs).
+   */
+  function getPickCardEligibleCards(allSets, allCards, options = {}) {
+    const { floor = 'all', setName = 'all', query = '' } = options || {};
+    const q = String(query || '').trim().toLowerCase();
+    const filterBySet =
+      (floor !== 'all' && floor !== '' && floor !== null && floor !== undefined) ||
+      (setName && setName !== 'all');
+
+    let targetSetNames = null;
+    if (filterBySet) {
+      let targetSets = allSets || [];
+      if (floor !== 'all' && floor !== '' && floor !== null && floor !== undefined) {
+        const floorNum = Number(floor);
+        targetSets = targetSets.filter((s) => Number(s.assignedFloor) === floorNum);
+      }
+      if (setName && setName !== 'all') {
+        targetSets = targetSets.filter((s) => s.set_name === setName);
+      }
+      targetSetNames = new Set(targetSets.map((s) => s.set_name));
+    }
+
+    const namesWithSets = new Set();
+    if (!filterBySet) {
+      for (const c of allCards || []) {
+        if (c && c.name && (!c.canonicalId || String(c.canonicalId) === String(c.id)) && Array.isArray(c.card_sets) && c.card_sets.length > 0) {
+          namesWithSets.add(c.name);
+        }
+      }
+    }
+
+    const result = [];
+    const seenNames = new Set();
+
+    for (const c of allCards || []) {
+      if (!c || !c.name) continue;
+      if (c.canonicalId && String(c.canonicalId) !== String(c.id)) continue;
+
+      if (filterBySet) {
+        if (seenNames.has(c.name)) continue;
+        if (!Array.isArray(c.card_sets) || !c.card_sets.some((cs) => targetSetNames.has(cs.set_name))) {
+          continue;
+        }
+      } else {
+        if (seenNames.has(c.name)) continue;
+        if (Array.isArray(c.card_sets) && c.card_sets.length === 0 && namesWithSets.has(c.name)) {
+          continue;
+        }
+      }
+
+      if (q && !String(c.name).toLowerCase().includes(q)) continue;
+
+      seenNames.add(c.name);
+      result.push(c);
+    }
+
+    return result;
   }
 
   return {
@@ -154,5 +251,8 @@
     groupByRarity,
     openPack,
     getEventEligibleSets,
+    getOwnedCountsByName,
+    getCardOwnedCount,
+    getPickCardEligibleCards,
   };
 });

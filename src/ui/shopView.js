@@ -236,6 +236,7 @@
 
   async function openEventModal(eventIndex, season, settings) {
     const App = root.YgoTower.App;
+    const Constants = root.YgoTower.Constants;
     const DB = root.YgoTower.DB;
     const Api = root.YgoTower.Api;
     const PackSim = root.YgoTower.PackSimulator;
@@ -243,10 +244,9 @@
 
     const ev = season.pendingEvents[eventIndex];
     const allSets = await db.sets.toArray();
-    const eligibleSets = PackSim.getEventEligibleSets(allSets, ev.floor);
+    const eligibleSets = PackSim.getEventEligibleSets(allSets, ev.floor, ev.type);
 
     if (ev.type === 'free_pack') {
-      const Constants = root.YgoTower.Constants;
       const sortedEligible = eligibleSets
         .slice()
         .sort((a, b) => (a.tcg_date || '').localeCompare(b.tcg_date || ''));
@@ -316,42 +316,116 @@
         bindButtons();
       });
     } else if (ev.type === 'pick_card') {
-      const eligibleSetNames = new Set(eligibleSets.map((s) => s.set_name));
       const allCards = await db.cards.toArray();
-      const eligibleCards = allCards.filter(
-        (c) => c.card_sets && c.card_sets.some((cs) => eligibleSetNames.has(cs.set_name))
-      );
+      const ownedByName = PackSim.getOwnedCountsByName(allCards, season.collection);
+      const totalPoolCount = PackSim.getPickCardEligibleCards(eligibleSets, allCards).length;
 
-      const renderCardChoices = (filterText = '') => {
-        const q = filterText.toLowerCase();
-        const matches = eligibleCards.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 24);
-        if (!matches.length) return `<p class="muted">ไม่พบการ์ดที่ค้นหา</p>`;
-        return matches
-          .map(
-            (c) => `
-          <div class="ygo-card-tile">
-            <img src="${App.escapeHtml(c.image_url || '')}" alt="${App.escapeHtml(c.name)}" loading="lazy" />
-            <strong>${App.escapeHtml(c.name)}</strong>
-            <button class="btn btn-sm btn-gold" data-pick-card-id="${c.id}">เลือกใบนี้</button>
-          </div>
-        `
-          )
-          .join('');
+      let selectedFloor = 'all';
+      let selectedSet = 'all';
+      let searchQuery = '';
+
+      const getFilteredSets = () =>
+        eligibleSets
+          .filter((s) => selectedFloor === 'all' || Number(s.assignedFloor) === Number(selectedFloor))
+          .slice()
+          .sort((a, b) => {
+            const floorDiff = Number(a.assignedFloor || 0) - Number(b.assignedFloor || 0);
+            if (floorDiff !== 0) return floorDiff;
+            const dateDiff = (a.tcg_date || '').localeCompare(b.tcg_date || '');
+            if (dateDiff !== 0) return dateDiff;
+            return (a.set_name || '').localeCompare(b.set_name || '');
+          });
+
+      const renderFloorOptions = () => [
+        `<option value="all"${selectedFloor === 'all' ? ' selected' : ''}>ทุกชั้น (1–7)</option>`,
+        ...((Constants && Constants.FLOORS) || []).map(
+          (f) =>
+            `<option value="${f.floor}"${String(selectedFloor) === String(f.floor) ? ' selected' : ''}>ชั้น ${f.floor}: ${App.escapeHtml(f.name)}</option>`
+        ),
+      ].join('');
+
+      const renderPackOptions = () => {
+        const setsForFloor = getFilteredSets();
+        if (selectedSet !== 'all' && !setsForFloor.some((s) => s.set_name === selectedSet)) {
+          selectedSet = 'all';
+        }
+        return [
+          `<option value="all"${selectedSet === 'all' ? ' selected' : ''}>ทุกซอง (${setsForFloor.length} ซอง)</option>`,
+          ...setsForFloor.map(
+            (s) =>
+              `<option value="${App.escapeHtml(s.set_name)}"${selectedSet === s.set_name ? ' selected' : ''}>[ชั้น ${s.assignedFloor}] ${App.escapeHtml(s.set_name)} (${App.escapeHtml(s.set_code)})</option>`
+          ),
+        ].join('');
       };
+
+      const renderCardChoices = () => {
+        const matches = PackSim.getPickCardEligibleCards(eligibleSets, allCards, {
+          floor: selectedFloor,
+          setName: selectedSet,
+          query: searchQuery,
+        });
+        const maxRender = selectedSet !== 'all' ? 120 : 48;
+        const visible = matches.slice(0, maxRender);
+        const summaryText =
+          matches.length > visible.length
+            ? `พบ ${matches.length} ใบ (แสดง ${visible.length} ใบแรก — พิมพ์ค้นหาหรือเลือกซองเพื่อดูเจาะจง)`
+            : `พบ ${matches.length} ใบ (จากทั้งหมด ${totalPoolCount} ใบในระบบ — รวมซองเสริม/Deck/Promo)`;
+
+        const cardsHtml = !visible.length
+          ? `<p class="muted">ไม่พบการ์ดที่ค้นหา</p>`
+          : visible
+              .map((c) => {
+                const owned = PackSim.getCardOwnedCount(c, ownedByName, season.collection);
+                const isMaxed = owned >= 3;
+                const badgeText = isMaxed ? `ครบ 3/3 ใบแล้ว` : owned > 0 ? `มีในคลัง x${owned}` : `ยังไม่มี (0/3)`;
+                return `
+                  <div class="ygo-card-tile">
+                    <img src="${App.escapeHtml(c.image_url || '')}" alt="${App.escapeHtml(c.name)}" loading="lazy" />
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:4px; flex-wrap:wrap;">
+                      <span class="badge">${App.escapeHtml(badgeText)}</span>
+                    </div>
+                    <strong>${App.escapeHtml(c.name)}</strong>
+                    <button class="btn btn-sm btn-gold" data-pick-card-id="${c.id}" ${isMaxed ? 'disabled' : ''}>
+                      ${isMaxed ? 'ครบ 3 ใบแล้ว' : 'เลือกใบนี้'}
+                    </button>
+                  </div>
+                `;
+              })
+              .join('');
+
+        return { summaryText, cardsHtml };
+      };
+
+      const initialPackOptions = renderPackOptions();
+      const initialView = renderCardChoices();
 
       App.openModal(`
         <h3 class="card-title">🌟 รางวัลชนะ 8 ครั้ง: เลือกการ์ดที่ต้องการ 1 ใบ</h3>
-        <p class="muted">เลือกการ์ดจาก Pool ชั้น ${ev.floor} (ไม่เกินชั้น ${Math.min(7, ev.floor + 1)}) — พบ ${eligibleCards.length} ใบ</p>
+        <p class="muted" id="eventPickSummary">เลือกการ์ดจากซองใด ชั้นใดก็ได้ หรือการ์ดนอกซองหอคอย (ไม่จำเป็นต้องปลดล็อค) • ${App.escapeHtml(initialView.summaryText)}</p>
+        <div class="form-row" style="gap:8px; margin-bottom:10px;">
+          <select id="eventCardFloorFilter" style="flex:1; min-width:150px;">${renderFloorOptions()}</select>
+          <select id="eventCardPackFilter" style="flex:2; min-width:200px;">${initialPackOptions}</select>
+        </div>
         <input type="text" id="eventCardSearch" placeholder="พิมพ์ชื่อการ์ด..." style="width:100%; margin-bottom:10px;" />
-        <div id="eventCardGrid" class="cards-grid" style="max-height:400px; overflow-y:auto;">${renderCardChoices()}</div>
+        <div id="eventCardGrid" class="cards-grid" style="max-height:380px; overflow-y:auto;">${initialView.cardsHtml}</div>
       `);
 
       const gridEl = document.getElementById('eventCardGrid');
+      const summaryEl = document.getElementById('eventPickSummary');
+      const floorSelect = document.getElementById('eventCardFloorFilter');
+      const packSelect = document.getElementById('eventCardPackFilter');
+      const searchInput = document.getElementById('eventCardSearch');
+
       const bindCardButtons = () => {
         gridEl.querySelectorAll('[data-pick-card-id]').forEach((btn) => {
           btn.addEventListener('click', async () => {
             const cardId = btn.dataset.pickCardId;
-            const pickedCard = eligibleCards.find((c) => String(c.id) === String(cardId));
+            const pickedCard = allCards.find((c) => String(c.id) === String(cardId));
+            if (!pickedCard) return;
+            if (PackSim.getCardOwnedCount(pickedCard, ownedByName, season.collection) >= 3) {
+              App.showToast('การ์ดใบนี้มีในคลังครบ 3 ใบแล้ว');
+              return;
+            }
             season.collection = season.collection || {};
             season.collection[cardId] = (season.collection[cardId] || 0) + 1;
             season.pendingEvents.splice(eventIndex, 1);
@@ -359,7 +433,7 @@
             App.closeModal();
 
             const PackEffects = root.YgoTower.PackEffects;
-            if (PackEffects && typeof PackEffects.showCardPick === 'function' && pickedCard) {
+            if (PackEffects && typeof PackEffects.showCardPick === 'function') {
               PackEffects.showCardPick({
                 card: pickedCard,
                 onDone: () => {
@@ -374,11 +448,34 @@
           });
         });
       };
+
+      const refreshPickGrid = () => {
+        const nextView = renderCardChoices();
+        if (summaryEl) {
+          summaryEl.textContent = `เลือกการ์ดจากซองใด ชั้นใดก็ได้ หรือการ์ดนอกซองหอคอย (ไม่จำเป็นต้องปลดล็อค) • ${nextView.summaryText}`;
+        }
+        gridEl.innerHTML = nextView.cardsHtml;
+        bindCardButtons();
+      };
+
       bindCardButtons();
 
-      document.getElementById('eventCardSearch').addEventListener('input', (e) => {
-        gridEl.innerHTML = renderCardChoices(e.target.value);
-        bindCardButtons();
+      floorSelect.addEventListener('change', (e) => {
+        selectedFloor = e.target.value;
+        selectedSet = 'all';
+        packSelect.innerHTML = renderPackOptions();
+        packSelect.value = selectedSet;
+        refreshPickGrid();
+      });
+
+      packSelect.addEventListener('change', (e) => {
+        selectedSet = e.target.value;
+        refreshPickGrid();
+      });
+
+      searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value;
+        refreshPickGrid();
       });
     }
   }
@@ -422,7 +519,7 @@
               .map(
                 (ev, idx) => `
               <button class="btn btn-gold" data-claim-event="${idx}">
-                ${ev.type === 'free_pack' ? `เปิดซองฟรี (Event 4 ชนะ • ชั้น ${ev.floor})` : `เลือกการ์ดฟรี 1 ใบ (Event 8 ชนะ • ชั้น ${ev.floor})`}
+                ${ev.type === 'free_pack' ? `เปิดซองฟรี (Event 4 ชนะ • ชั้น ${ev.floor})` : `เลือกการ์ดฟรี 1 ใบ (Event 8 ชนะ • ทุกชั้น/ทุกซอง)`}
               </button>
             `
               )
@@ -504,9 +601,9 @@
     `;
 
     container.querySelectorAll('[data-claim-event]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        openEventModal(Number(btn.dataset.claimEvent), season, settings);
-      });
+      btn.addEventListener('click', () =>
+        openEventModal(Number(btn.dataset.claimEvent), season, settings)
+      );
     });
 
     container.querySelectorAll('[data-shop-floor]').forEach((btn) => {

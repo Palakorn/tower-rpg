@@ -58,6 +58,94 @@
     return parts.join('\n');
   }
 
+  function encodeUint32Base64(ids) {
+    const list = Array.isArray(ids) ? ids : [];
+    const bytes = new Uint8Array(list.length * 4);
+    const view = new DataView(bytes.buffer);
+    for (let i = 0; i < list.length; i++) {
+      const id = Number(list[i]);
+      if (!Number.isInteger(id) || id <= 0 || id > 0xffffffff) {
+        throw new Error(`รหัสการ์ดไม่ถูกต้อง: ${list[i]}`);
+      }
+      view.setUint32(i * 4, id, true);
+    }
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  function decodeUint32Base64(b64, zoneLabel) {
+    if (!b64) return [];
+    if (/\s/.test(b64) || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64) || b64.length % 4 !== 0) {
+      throw new Error(`รูปแบบ Base64 ในโซน ${zoneLabel} ไม่ถูกต้อง`);
+    }
+    let binary;
+    try {
+      binary = atob(b64);
+    } catch {
+      throw new Error(`รูปแบบ Base64 ในโซน ${zoneLabel} ไม่ถูกต้อง`);
+    }
+    if (binary.length % 4 !== 0) {
+      throw new Error(`ข้อมูลไบต์ในโซน ${zoneLabel} ไม่สมบูรณ์ (ต้องหาร 4 ลงตัว)`);
+    }
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const view = new DataView(bytes.buffer);
+    const ids = [];
+    for (let i = 0; i < bytes.length; i += 4) {
+      const id = view.getUint32(i, true);
+      if (id <= 0) {
+        throw new Error(`พบรหัสการ์ดที่ไม่ถูกต้อง (${id}) ในโซน ${zoneLabel}`);
+      }
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  /**
+   * Parse a ydke:// URI string into { main, extra, side } arrays of numeric passcodes.
+   * Throws an Error with a descriptive message if the URI format is invalid.
+   * @param {string} uri
+   */
+  function parseYdke(uri) {
+    const trimmed = String(uri ?? '').trim();
+    if (!trimmed) {
+      throw new Error('กรุณากรอกลิงก์ ydke://...');
+    }
+    if (!trimmed.startsWith('ydke://')) {
+      throw new Error('ลิงก์ต้องขึ้นต้นด้วย ydke://');
+    }
+
+    const payload = trimmed.slice('ydke://'.length);
+    const parts = payload.split('!');
+    const isValidFourParts = parts.length === 4 && parts[3] === '';
+    const isValidThreeParts = parts.length === 3;
+    if (!isValidFourParts && !isValidThreeParts) {
+      throw new Error('รูปแบบ YDKE ต้องประกอบด้วย 3 โซนคั่นด้วยเครื่องหมาย ! (ydke://main!extra!side!)');
+    }
+
+    return {
+      main: decodeUint32Base64(parts[0], 'Main Deck'),
+      extra: decodeUint32Base64(parts[1], 'Extra Deck'),
+      side: decodeUint32Base64(parts[2], 'Side Deck'),
+    };
+  }
+
+  /**
+   * Generate a ydke:// URI string from { main, extra, side }.
+   * @param {{ main?: number[], extra?: number[], side?: number[] }} deck
+   */
+  function generateYdke(deck) {
+    const main = encodeUint32Base64((deck && deck.main) || []);
+    const extra = encodeUint32Base64((deck && deck.extra) || []);
+    const side = encodeUint32Base64((deck && deck.side) || []);
+    return `ydke://${main}!${extra}!${side}!`;
+  }
+
   /**
    * Generate an MDPro4 trunk whitelist (.lflist.conf) string from a card collection.
    * Limits each card count to 1-3 copies.
@@ -155,15 +243,16 @@
    * @param {{ main: number[], extra: number[], side: number[] }} deck
    * @param {Record<string, number>} collection
    * @param {Map<number, { name: string }>} [cardLookup]
+   * @param {{ emptyMessage?: string }} [options]
    */
-  function validateDeckCollection(deck, collection, cardLookup) {
+  function validateDeckCollection(deck, collection, cardLookup, options) {
     const main = (deck && deck.main) || [];
     const extra = (deck && deck.extra) || [];
     const side = (deck && deck.side) || [];
 
     const errors = [];
     if (main.length + extra.length + side.length === 0) {
-      errors.push('ไม่พบการ์ดในไฟล์ .ydk นี้');
+      errors.push((options && options.emptyMessage) || 'ไม่พบการ์ดในไฟล์ .ydk นี้');
     } else {
       errors.push(...collectCollectionErrors(deck, collection, cardLookup));
     }
@@ -271,6 +360,8 @@
   return {
     parseYdk,
     generateYdk,
+    parseYdke,
+    generateYdke,
     generateTrunk,
     addDeckToCollection,
     validateDeck,

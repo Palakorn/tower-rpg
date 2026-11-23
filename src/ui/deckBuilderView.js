@@ -9,6 +9,37 @@
     return t.includes('fusion') || t.includes('synchro') || t.includes('xyz') || t.includes('link');
   }
 
+  function buildCardStatPills(card, App) {
+    const pills = [];
+    if (card.type) pills.push(`<span class="badge">${App.escapeHtml(card.type)}</span>`);
+    if (card.attribute) pills.push(`<span class="badge">${App.escapeHtml(card.attribute)}</span>`);
+    if (card.race) pills.push(`<span class="badge">${App.escapeHtml(card.race)}</span>`);
+    if (card.level !== null && card.level !== undefined) {
+      pills.push(`<span class="badge">LV/Rank ${card.level}</span>`);
+    }
+    if (card.atk !== null && card.atk !== undefined) {
+      pills.push(`<span class="badge">ATK ${card.atk}</span>`);
+    }
+    if (card.def !== null && card.def !== undefined) {
+      pills.push(`<span class="badge">DEF ${card.def}</span>`);
+    }
+    return pills;
+  }
+
+  function getCardZoneCounts(deck, id) {
+    const countIn = (arr) => arr.reduce((acc, cur) => (cur === id ? acc + 1 : acc), 0);
+    const main = countIn(deck.main);
+    const extra = countIn(deck.extra);
+    const side = countIn(deck.side);
+    return { main, extra, side, total: main + extra + side };
+  }
+
+  const ZONE_LABELS = {
+    main: 'Main Deck',
+    extra: 'Extra Deck',
+    side: 'Side Deck',
+  };
+
   async function renderDeckBuilderView(container, state) {
     const App = root.YgoTower.App;
     const DB = root.YgoTower.DB;
@@ -44,6 +75,122 @@
 
     const validation = Ydk.validateDeck(deck, collection, cardMap);
 
+    const addCardToDeck = async (id, mode) => {
+      const card = cardMap.get(id);
+      const owned = collection[String(id)] || 0;
+      const used = getCardZoneCounts(deck, id).total;
+      if (used >= Math.min(3, owned)) return false;
+
+      const zone = mode === 'side' ? 'side' : isExtraDeckCard(card) ? 'extra' : 'main';
+      deck[zone].push(id);
+      await DB.saveSeason(season);
+      await renderDeckBuilderView(container, state);
+      return true;
+    };
+
+    const removeCardFromDeck = async (id, zone) => {
+      const zoneArr = deck[zone];
+      if (!Array.isArray(zoneArr)) return false;
+      const idx = zoneArr.indexOf(id);
+      if (idx === -1) return false;
+
+      zoneArr.splice(idx, 1);
+      await DB.saveSeason(season);
+      await renderDeckBuilderView(container, state);
+      return true;
+    };
+
+    const openDeckCardModal = (id) => {
+      const card = cardMap.get(id) || { id, name: `Card #${id}`, type: '', frameType: '', image_url: '' };
+      const statPills = buildCardStatPills(card, App);
+      const primaryZone = isExtraDeckCard(card) ? 'extra' : 'main';
+      const primaryZoneLabel = ZONE_LABELS[primaryZone];
+      let modalBusy = false;
+
+      const renderModal = () => {
+        const owned = collection[String(id)] || 0;
+        const maxAllowed = Math.min(3, owned);
+        const counts = getCardZoneCounts(deck, id);
+        const canAdd = counts.total < maxAllowed;
+
+        const zoneBadges = [];
+        if (primaryZone === 'extra') {
+          zoneBadges.push(`<span class="badge">Extra: ${counts.extra}</span>`);
+          if (counts.main > 0) zoneBadges.push(`<span class="badge">Main: ${counts.main}</span>`);
+        } else {
+          zoneBadges.push(`<span class="badge">Main: ${counts.main}</span>`);
+          if (counts.extra > 0) zoneBadges.push(`<span class="badge">Extra: ${counts.extra}</span>`);
+        }
+        zoneBadges.push(`<span class="badge">Side: ${counts.side}</span>`);
+
+        const removeButtons = ['main', 'extra', 'side']
+          .filter((zone) => counts[zone] > 0)
+          .map(
+            (zone) =>
+              `<button class="btn btn-sm btn-danger" data-modal-remove="${zone}">- เอาออกจาก ${ZONE_LABELS[zone]} (${counts[zone]})</button>`
+          )
+          .join('');
+
+        App.openModal(`
+          <div class="pack-detail-modal">
+            <div class="form-row" style="justify-content:space-between; margin-bottom:12px;">
+              <strong class="muted">รายละเอียดการ์ด</strong>
+              <button class="btn btn-sm" id="closeDeckCardModalBtn">ปิด</button>
+            </div>
+            <div class="card-detail-layout">
+              <img class="card-detail-img" src="${App.escapeHtml(card.image_url || '')}" alt="${App.escapeHtml(card.name)}" />
+              <div>
+                <h3 style="margin:0 0 6px;">${App.escapeHtml(card.name)}</h3>
+                <div class="card-detail-meta">
+                  <span class="badge">ID: ${card.id}</span>
+                  <span class="badge">มีในคลัง: ${owned} ใบ</span>
+                  <span class="badge">ใช้ใน Deck: ${counts.total}/${maxAllowed}</span>
+                  ${zoneBadges.join('')}
+                </div>
+                ${statPills.length ? `<div class="card-detail-meta">${statPills.join('')}</div>` : ''}
+                <div class="card-detail-desc">${App.escapeHtml(card.desc || 'ไม่มีคำอธิบาย')}</div>
+                <div class="deck-card-modal-actions">
+                  <button class="btn btn-sm btn-primary" data-modal-add="auto" ${canAdd ? '' : 'disabled'}>+ ${primaryZoneLabel}</button>
+                  <button class="btn btn-sm" data-modal-add="side" ${canAdd ? '' : 'disabled'}>+ Side Deck</button>
+                  ${removeButtons}
+                </div>
+              </div>
+            </div>
+          </div>
+        `);
+
+        document.getElementById('closeDeckCardModalBtn').addEventListener('click', () => App.closeModal());
+
+        document.querySelectorAll('[data-modal-add]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            if (modalBusy) return;
+            modalBusy = true;
+            try {
+              const changed = await addCardToDeck(id, btn.dataset.modalAdd);
+              if (changed) renderModal();
+            } finally {
+              modalBusy = false;
+            }
+          });
+        });
+
+        document.querySelectorAll('[data-modal-remove]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            if (modalBusy) return;
+            modalBusy = true;
+            try {
+              const changed = await removeCardFromDeck(id, btn.dataset.modalRemove);
+              if (changed) renderModal();
+            } finally {
+              modalBusy = false;
+            }
+          });
+        });
+      };
+
+      renderModal();
+    };
+
     const buildCollectionHtml = () => {
       const q = searchQuery.toLowerCase();
       const filteredOwned = ownedIds
@@ -58,11 +205,11 @@
               const maxAllowed = Math.min(3, owned);
               const canAdd = used < maxAllowed;
               return `
-                <div class="ygo-card-tile">
+                <div class="ygo-card-tile clickable" data-inspect-card="${id}" title="คลิกเพื่อดูรายละเอียด ${App.escapeHtml(card.name)}">
                   <img src="${App.escapeHtml(card.image_url || '')}" alt="${App.escapeHtml(card.name)}" loading="lazy" />
                   <strong>${App.escapeHtml(card.name)}</strong>
                   <div class="muted">มี ${owned} ใบ • ใช้ ${used}/${maxAllowed}</div>
-                  <div style="display:flex; gap:4px; margin-top:auto;">
+                  <div style="display:flex; gap:4px; margin-top:auto;" data-no-inspect>
                     <button class="btn btn-sm btn-primary" data-add-card="auto:${id}" ${canAdd ? '' : 'disabled'}>+ Deck</button>
                     <button class="btn btn-sm" data-add-card="side:${id}" ${canAdd ? '' : 'disabled'}>+ Side</button>
                   </div>
@@ -83,7 +230,7 @@
             ? `<img class="deck-card-thumb" src="${App.escapeHtml(c.image_url)}" alt="${App.escapeHtml(c.name)}" loading="lazy" />`
             : `<div class="deck-card-thumb" aria-hidden="true"></div>`;
           return `
-            <div class="floor-item deck-card-row">
+            <div class="floor-item deck-card-row clickable" data-inspect-card="${id}">
               <span class="deck-card-info" title="${App.escapeHtml(c.name)}">
                 ${thumbHtml}
                 <span class="deck-card-name"><strong>${cnt}x</strong> ${App.escapeHtml(c.name)}</span>
@@ -105,14 +252,16 @@
       <div class="grid-2" style="grid-template-columns: 340px 1fr;">
         <div>
           <div class="card">
-            <h3 class="card-title">
+            <h3 class="card-title" style="flex-wrap:wrap;">
               <span>📦 Deck ปัจจุบัน</span>
-              <span style="display:flex; gap:6px;">
+              <span style="display:flex; gap:6px; flex-wrap:wrap;">
                 <label class="btn btn-sm" style="cursor:pointer;">
                   📤 Import .ydk
                   <input type="file" id="importPlayerYdkInput" accept=".ydk" style="display:none;" />
                 </label>
                 <button class="btn btn-sm btn-gold" id="exportPlayerYdkBtn">📥 Export .ydk</button>
+                <button class="btn btn-sm" id="importPlayerYdkeBtn">📤 Import YDKE</button>
+                <button class="btn btn-sm btn-gold" id="exportPlayerYdkeBtn">📥 Export YDKE</button>
               </span>
             </h3>
             ${
@@ -143,14 +292,17 @@
     const renderCollectionGrid = () => {
       collectionGrid.innerHTML = buildCollectionHtml();
       collectionGrid.querySelectorAll('[data-add-card]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
           const [mode, idStr] = btn.dataset.addCard.split(':');
-          const id = Number(idStr);
-          const card = cardMap.get(id);
-          const zone = mode === 'side' ? 'side' : isExtraDeckCard(card) ? 'extra' : 'main';
-          deck[zone].push(id);
-          await DB.saveSeason(season);
-          renderDeckBuilderView(container, state);
+          await addCardToDeck(Number(idStr), mode);
+        });
+      });
+
+      collectionGrid.querySelectorAll('[data-inspect-card]').forEach((tile) => {
+        tile.addEventListener('click', (e) => {
+          if (e.target.closest('button, [data-no-inspect]')) return;
+          openDeckCardModal(Number(tile.dataset.inspectCard));
         });
       });
     };
@@ -161,6 +313,47 @@
       searchQuery = e.target.value;
       renderCollectionGrid();
     });
+
+    const applyImportedDeck = async (
+      importedDeck,
+      { emptyMessage, confirmMessage, successMessage, onValidationError, beforeRender }
+    ) => {
+      const importedIds = [...new Set([...importedDeck.main, ...importedDeck.extra, ...importedDeck.side])];
+      const importedCardMap = await Api.getCardsByIds(importedIds);
+
+      const check = Ydk.validateDeckCollection(importedDeck, collection, importedCardMap, { emptyMessage });
+      if (!check.valid) {
+        onValidationError(check.errors);
+        return false;
+      }
+
+      const currentCount = deck.main.length + deck.extra.length + deck.side.length;
+      if (currentCount > 0 && typeof window !== 'undefined' && typeof window.confirm === 'function' && !window.confirm(confirmMessage)) {
+        return false;
+      }
+
+      season.playerDeck = importedDeck;
+      await DB.saveSeason(season);
+      if (typeof beforeRender === 'function') {
+        beforeRender();
+      }
+      App.showToast(successMessage);
+      await renderDeckBuilderView(container, state);
+      return true;
+    };
+
+    const copyTextToClipboard = async (text) => {
+      const nav = root.navigator || (typeof navigator !== 'undefined' ? navigator : null);
+      if (!nav || !nav.clipboard || typeof nav.clipboard.writeText !== 'function') {
+        return false;
+      }
+      try {
+        await nav.clipboard.writeText(text);
+        return true;
+      } catch {
+        return false;
+      }
+    };
 
     document.getElementById('exportPlayerYdkBtn').addEventListener('click', () => {
       const ydkText = Ydk.generateYdk(deck);
@@ -175,35 +368,132 @@
 
       const text = await file.text();
       const importedDeck = Ydk.parseYdk(text);
-      const importedIds = [...new Set([...importedDeck.main, ...importedDeck.extra, ...importedDeck.side])];
-      const importedCardMap = await Api.getCardsByIds(importedIds);
 
-      const check = Ydk.validateDeckCollection(importedDeck, collection, importedCardMap);
-      if (!check.valid) {
-        App.showToast('ไม่สามารถ Import .ydk ได้');
-        App.openModal(`
-          <h3 class="card-title">❌ ไม่สามารถ Import ไฟล์ .ydk ได้</h3>
-          <p class="muted" style="margin-top:0;">พบการ์ดที่ไม่ผ่านเงื่อนไขคลังการ์ด จึงยังคง Deck เดิมไว้:</p>
-          <div class="alert-box danger" style="max-height:280px; overflow-y:auto; font-size:0.86rem;">
-            ${check.errors.map((err) => `<div>• ${App.escapeHtml(err)}</div>`).join('')}
-          </div>
-          <div class="form-row" style="justify-content:flex-end; margin-top:12px;">
-            <button class="btn btn-primary" id="closeImportErrorModalBtn">ปิด</button>
-          </div>
-        `);
-        document.getElementById('closeImportErrorModalBtn').addEventListener('click', () => App.closeModal());
+      await applyImportedDeck(importedDeck, {
+        emptyMessage: 'ไม่พบการ์ดในไฟล์ .ydk นี้',
+        confirmMessage: 'Deck ปัจจุบันมีการ์ดอยู่แล้ว ต้องการนำเข้าไฟล์ .ydk เพื่อแทนที่หรือไม่?',
+        successMessage: `Import .ydk สำเร็จ (Main ${importedDeck.main.length}, Extra ${importedDeck.extra.length}, Side ${importedDeck.side.length})`,
+        onValidationError: (errors) => {
+          App.showToast('ไม่สามารถ Import .ydk ได้');
+          App.openModal(`
+            <h3 class="card-title">❌ ไม่สามารถ Import ไฟล์ .ydk ได้</h3>
+            <p class="muted" style="margin-top:0;">พบการ์ดที่ไม่ผ่านเงื่อนไขคลังการ์ด จึงยังคง Deck เดิมไว้:</p>
+            <div class="alert-box danger" style="max-height:280px; overflow-y:auto; font-size:0.86rem;">
+              ${errors.map((err) => `<div>• ${App.escapeHtml(err)}</div>`).join('')}
+            </div>
+            <div class="form-row" style="justify-content:flex-end; margin-top:12px;">
+              <button class="btn btn-primary" id="closeImportErrorModalBtn">ปิด</button>
+            </div>
+          `);
+          document.getElementById('closeImportErrorModalBtn').addEventListener('click', () => App.closeModal());
+        },
+      });
+    });
+
+    document.getElementById('exportPlayerYdkeBtn').addEventListener('click', async () => {
+      let ydkeUri;
+      try {
+        ydkeUri = Ydk.generateYdke(deck);
+      } catch (err) {
+        App.showToast(err && err.message ? err.message : 'ไม่สามารถสร้างลิงก์ YDKE ได้');
         return;
       }
 
-      const currentCount = deck.main.length + deck.extra.length + deck.side.length;
-      if (currentCount > 0 && !window.confirm('Deck ปัจจุบันมีการ์ดอยู่แล้ว ต้องการนำเข้าไฟล์ .ydk เพื่อแทนที่หรือไม่?')) {
+      const copied = await copyTextToClipboard(ydkeUri);
+      if (copied) {
+        App.showToast(`คัดลอกลิงก์ YDKE สำเร็จ (Main ${deck.main.length}, Extra ${deck.extra.length}, Side ${deck.side.length})`);
         return;
       }
 
-      season.playerDeck = importedDeck;
-      await DB.saveSeason(season);
-      App.showToast(`Import .ydk สำเร็จ (Main ${importedDeck.main.length}, Extra ${importedDeck.extra.length}, Side ${importedDeck.side.length})`);
-      renderDeckBuilderView(container, state);
+      App.openModal(`
+        <h3 class="card-title">📥 Export ลิงก์ YDKE</h3>
+        <p class="muted" style="margin-top:0;">ไม่สามารถคัดลอกลง Clipboard อัตโนมัติได้ กรุณาคัดลอกลิงก์ด้านล่าง:</p>
+        <textarea id="exportYdkeTextarea" readonly rows="4" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;">${App.escapeHtml(ydkeUri)}</textarea>
+        <div class="form-row" style="justify-content:flex-end; gap:8px; margin-top:12px;">
+          <button type="button" class="btn" id="copyExportYdkeFallbackBtn">📋 คัดลอก</button>
+          <button type="button" class="btn btn-primary" id="closeExportYdkeModalBtn">ปิด</button>
+        </div>
+      `);
+
+      const textarea = document.getElementById('exportYdkeTextarea');
+      if (textarea) {
+        textarea.focus?.();
+        textarea.select?.();
+      }
+      document.getElementById('copyExportYdkeFallbackBtn').addEventListener('click', async () => {
+        if (textarea) {
+          textarea.focus?.();
+          textarea.select?.();
+        }
+        const ok = await copyTextToClipboard(ydkeUri);
+        if (ok) {
+          App.showToast('คัดลอกลิงก์ YDKE สำเร็จ');
+        } else {
+          App.showToast('กรุณากด Ctrl+C / Cmd+C เพื่อคัดลอกด้วยตนเอง');
+        }
+      });
+      document.getElementById('closeExportYdkeModalBtn').addEventListener('click', () => App.closeModal());
+    });
+
+    document.getElementById('importPlayerYdkeBtn').addEventListener('click', () => {
+      App.openModal(`
+        <h3 class="card-title">📤 Import Deck จากลิงก์ YDKE</h3>
+        <p class="muted" style="margin-top:0;">วางลิงก์รูปแบบ <code>ydke://...</code> เพื่อนำเข้า Deck (ตรวจการ์ดในคลังและจำกัดชื่อละไม่เกิน 3 ใบ)</p>
+        <textarea id="importYdkeTextarea" rows="4" placeholder="ydke://..." style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;"></textarea>
+        <div id="importYdkeErrorBox"></div>
+        <div class="form-row" style="justify-content:flex-end; gap:8px; margin-top:12px;">
+          <button type="button" class="btn" id="cancelImportYdkeBtn">ยกเลิก</button>
+          <button type="button" class="btn btn-primary" id="confirmImportYdkeBtn">นำเข้า Deck</button>
+        </div>
+      `);
+
+      const textarea = document.getElementById('importYdkeTextarea');
+      const errorBox = document.getElementById('importYdkeErrorBox');
+      let importBusy = false;
+
+      if (textarea) {
+        textarea.focus?.();
+      }
+
+      const showErrorList = (errors) => {
+        if (!errorBox) return;
+        errorBox.innerHTML = `
+          <div class="alert-box danger" style="max-height:200px; overflow-y:auto; font-size:0.85rem; margin-top:10px;">
+            ${errors.map((err) => `<div>• ${App.escapeHtml(err)}</div>`).join('')}
+          </div>
+        `;
+      };
+
+      document.getElementById('cancelImportYdkeBtn').addEventListener('click', () => App.closeModal());
+      document.getElementById('confirmImportYdkeBtn').addEventListener('click', async () => {
+        if (importBusy) return;
+        importBusy = true;
+        if (errorBox) errorBox.innerHTML = '';
+
+        try {
+          let importedDeck;
+          try {
+            importedDeck = Ydk.parseYdke(textarea ? textarea.value : '');
+          } catch (err) {
+            App.showToast('ไม่สามารถ Import YDKE ได้');
+            showErrorList([err && err.message ? err.message : 'รูปแบบลิงก์ YDKE ไม่ถูกต้อง']);
+            return;
+          }
+
+          await applyImportedDeck(importedDeck, {
+            emptyMessage: 'ไม่พบการ์ดในลิงก์ YDKE นี้',
+            confirmMessage: 'Deck ปัจจุบันมีการ์ดอยู่แล้ว ต้องการนำเข้า YDKE เพื่อแทนที่หรือไม่?',
+            successMessage: `Import YDKE สำเร็จ (Main ${importedDeck.main.length}, Extra ${importedDeck.extra.length}, Side ${importedDeck.side.length})`,
+            beforeRender: () => App.closeModal(),
+            onValidationError: (errors) => {
+              App.showToast('ไม่สามารถ Import YDKE ได้');
+              showErrorList(errors);
+            },
+          });
+        } finally {
+          importBusy = false;
+        }
+      });
     });
 
     document.getElementById('exportTrunkBtn').addEventListener('click', () => {
@@ -213,15 +503,17 @@
     });
 
     container.querySelectorAll('[data-remove-card]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         const [zone, idStr] = btn.dataset.removeCard.split(':');
-        const id = Number(idStr);
-        const idx = deck[zone].indexOf(id);
-        if (idx !== -1) {
-          deck[zone].splice(idx, 1);
-          await DB.saveSeason(season);
-          renderDeckBuilderView(container, state);
-        }
+        await removeCardFromDeck(Number(idStr), zone);
+      });
+    });
+
+    container.querySelectorAll('.deck-card-row[data-inspect-card]').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        openDeckCardModal(Number(row.dataset.inspectCard));
       });
     });
   }
