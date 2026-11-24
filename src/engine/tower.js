@@ -14,23 +14,74 @@
   /**
    * Shuffle an array (Fisher-Yates) without mutating the original.
    */
-  function shuffle(arr) {
+  function shuffle(arr, rng = Math.random) {
     const copy = arr.slice();
     for (let i = copy.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(rng() * (i + 1));
       [copy[i], copy[j]] = [copy[j], copy[i]];
     }
     return copy;
   }
 
   /**
-   * Pick N opponents for a given role and floor from the roster, with fallback to any floor.
+   * Partition candidates into fresh (not locked or avoided), avoided, and locked buckets.
    */
-  function pickOpponents(roster, role, floor, count) {
-    const exact = shuffle(roster.filter((c) => c.role === role && Number(c.preferredFloor) === floor));
-    const fallback = shuffle(roster.filter((c) => c.role === role && Number(c.preferredFloor) !== floor));
-    const anyRole = shuffle(roster.filter((c) => c.role !== role));
-    const pool = [...exact, ...fallback, ...anyRole];
+  function orderTierCandidates(items, lockedSet, avoidSet, rng) {
+    const fresh = [];
+    const avoided = [];
+    const locked = [];
+    for (const item of items) {
+      if (lockedSet.has(item.id)) {
+        locked.push(item);
+      } else if (avoidSet.has(item.id)) {
+        avoided.push(item);
+      } else {
+        fresh.push(item);
+      }
+    }
+    return {
+      nonLocked: [...shuffle(fresh, rng), ...shuffle(avoided, rng)],
+      locked: shuffle(locked, rng),
+    };
+  }
+
+  /**
+   * Pick N opponents for a given role and floor from the roster, with fallback to any floor.
+   * Prefers candidates not in lockedRosterIds or avoidRosterIds when available.
+   */
+  function pickOpponents(roster, role, floor, count, options = {}) {
+    if (count <= 0) return [];
+    const rng = options.rng || Math.random;
+    const lockedSet = new Set(options.lockedRosterIds || []);
+    const avoidSet = new Set(options.avoidRosterIds || []);
+
+    const exact = orderTierCandidates(
+      roster.filter((c) => c.role === role && Number(c.preferredFloor) === floor),
+      lockedSet,
+      avoidSet,
+      rng
+    );
+    const fallback = orderTierCandidates(
+      roster.filter((c) => c.role === role && Number(c.preferredFloor) !== floor),
+      lockedSet,
+      avoidSet,
+      rng
+    );
+    const anyRole = orderTierCandidates(
+      roster.filter((c) => c.role !== role),
+      lockedSet,
+      avoidSet,
+      rng
+    );
+
+    const pool = [
+      ...exact.nonLocked,
+      ...fallback.nonLocked,
+      ...anyRole.nonLocked,
+      ...exact.locked,
+      ...fallback.locked,
+      ...anyRole.locked,
+    ];
 
     const picked = [];
     for (let i = 0; i < count; i++) {
@@ -68,6 +119,214 @@
       },
       pendingPenalty: null, // { role, index, rematchCost }
     };
+  }
+
+  /**
+   * Pre-generate initial states for all 7 floors of a season.
+   */
+  function createAllFloorStates(roster, settings) {
+    const floorStates = {};
+    for (const f of Constants.FLOORS) {
+      floorStates[f.floor] = createFloorState(f.floor, roster, settings);
+    }
+    return floorStates;
+  }
+
+  /**
+   * Ensure season.floorStates exists for all floors 1..7 and stays synced with season.floorState.
+   */
+  function ensureFloorStates(season, roster = [], settings) {
+    let changed = false;
+    if (!season.floorStates || typeof season.floorStates !== 'object') {
+      season.floorStates = {};
+      changed = true;
+    }
+
+    if (season.floorState && !season.floorStates[season.currentFloor]) {
+      season.floorStates[season.currentFloor] = season.floorState;
+      changed = true;
+    }
+
+    for (const f of Constants.FLOORS) {
+      if (!season.floorStates[f.floor]) {
+        season.floorStates[f.floor] = createFloorState(f.floor, roster, settings);
+        changed = true;
+      }
+    }
+
+    if (season.floorStates[season.currentFloor] && season.floorState !== season.floorStates[season.currentFloor]) {
+      season.floorState = season.floorStates[season.currentFloor];
+      changed = true;
+    }
+
+    return { floorStates: season.floorStates, changed };
+  }
+
+  /**
+   * Get the floor state for a specific floor (falling back to season.floorState for currentFloor).
+   */
+  function getFloorState(season, floor) {
+    if (season.floorStates && season.floorStates[floor]) {
+      return season.floorStates[floor];
+    }
+    if (floor === season.currentFloor && season.floorState) {
+      return season.floorState;
+    }
+    return null;
+  }
+
+  /**
+   * Check whether a floor (or specific tier scope) can be re-randomized and explain why if not.
+   */
+  function canRerandomFloor(season, floor, scope = 'all') {
+    const fs = getFloorState(season, floor);
+    if (!fs) {
+      return { allowed: false, reason: 'ไม่พบข้อมูลของชั้นนี้' };
+    }
+
+    const isCleared =
+      (season.unlockedFloors || []).includes(floor) ||
+      fs.phase === 'cleared' ||
+      floor < season.currentFloor;
+    if (isCleared) {
+      return { allowed: false, reason: 'ชั้นที่ผ่านแล้วไม่สามารถ Re-random ได้' };
+    }
+
+    const isCurrent = floor === season.currentFloor;
+    const penalty = isCurrent ? fs.pendingPenalty : null;
+
+    const guardsAllowed = (fs.guards || []).some((g) => !g.defeated);
+    const minibossBlockedByPenalty = Boolean(penalty && penalty.role === 'miniboss');
+    const minibossesAllowed = !minibossBlockedByPenalty && (fs.minibosses || []).some((m) => !m.defeated);
+
+    const bossBlockedByPenalty = Boolean(penalty && penalty.role === 'boss');
+    const bossStartedBo3 = (fs.boss?.bo3Wins || 0) > 0 || (fs.boss?.bo3Losses || 0) > 0;
+    const bossAllowed = !bossBlockedByPenalty && !fs.boss?.defeated && !bossStartedBo3;
+
+    if (scope === 'guards') {
+      return guardsAllowed
+        ? { allowed: true, reason: '' }
+        : { allowed: false, reason: 'ชนะทหารยามครบแล้ว' };
+    }
+    if (scope === 'minibosses') {
+      if (minibossBlockedByPenalty) {
+        return { allowed: false, reason: 'กำลังติดสถานะรอ Rematch มินิบอส' };
+      }
+      return minibossesAllowed
+        ? { allowed: true, reason: '' }
+        : { allowed: false, reason: 'ชนะมินิบอสครบแล้ว' };
+    }
+    if (scope === 'boss') {
+      if (bossBlockedByPenalty) {
+        return { allowed: false, reason: 'กำลังติดสถานะรอ Rematch บอส' };
+      }
+      if (fs.boss?.defeated) {
+        return { allowed: false, reason: 'ชนะบอสประจำชั้นแล้ว' };
+      }
+      if (bossStartedBo3) {
+        return { allowed: false, reason: 'เริ่มสู้บอส Bo3 ไปแล้ว ไม่สามารถ Re-random บอสได้' };
+      }
+      return { allowed: true, reason: '' };
+    }
+
+    if (penalty) {
+      return { allowed: false, reason: 'กำลังติดสถานะรอ Rematch กรุณาจัดการก่อน Re-random ทั้งชั้น' };
+    }
+    if (!guardsAllowed && !minibossesAllowed && !bossAllowed) {
+      return { allowed: false, reason: 'ไม่มีคู่ต่อสู้ที่สามารถ Re-random ได้แล้ว' };
+    }
+    return { allowed: true, reason: '' };
+  }
+
+  /**
+   * Re-pick only undefeated slots in a guard/miniboss list while preserving defeated opponents.
+   */
+  function rerandomSlotList(currentList, role, floor, targetCount, roster, options = {}) {
+    const lockedRosterIds = currentList.filter((o) => o.defeated && o.rosterId).map((o) => o.rosterId);
+    const avoidRosterIds = currentList.filter((o) => !o.defeated && o.rosterId).map((o) => o.rosterId);
+
+    if (currentList.length === targetCount) {
+      const undefeatedIndices = [];
+      currentList.forEach((o, idx) => {
+        if (!o.defeated) undefeatedIndices.push(idx);
+      });
+      if (undefeatedIndices.length === 0) return currentList;
+
+      const replacements = pickOpponents(roster, role, floor, undefeatedIndices.length, {
+        lockedRosterIds,
+        avoidRosterIds,
+        rng: options.rng,
+      });
+      const next = currentList.slice();
+      undefeatedIndices.forEach((slotIdx, i) => {
+        next[slotIdx] = replacements[i];
+      });
+      return next;
+    }
+
+    const defeatedEntries = currentList.filter((o) => o.defeated);
+    const needed = Math.max(0, targetCount - defeatedEntries.length);
+    const replacements = pickOpponents(roster, role, floor, needed, {
+      lockedRosterIds,
+      avoidRosterIds,
+      rng: options.rng,
+    });
+    return [...defeatedEntries, ...replacements];
+  }
+
+  /**
+   * Re-randomize opponents for a given floor and scope ('all' | 'guards' | 'minibosses' | 'boss').
+   * Preserves defeated opponents and respects cleared floors, pending penalties, and active Boss Bo3 matches.
+   */
+  function rerandomFloor(season, floor, scope = 'all', roster = [], settings, options = {}) {
+    ensureFloorStates(season, roster, settings);
+    const check = canRerandomFloor(season, floor, scope);
+    if (!check.allowed) {
+      throw new Error(check.reason);
+    }
+
+    const fs = season.floorStates[floor];
+    const eco = getFloorEconomy(floor, settings);
+
+    if (scope === 'all' || scope === 'guards') {
+      if (canRerandomFloor(season, floor, 'guards').allowed) {
+        fs.guards = rerandomSlotList(fs.guards || [], 'guard', floor, eco.guardCount, roster, options);
+      }
+    }
+
+    if (scope === 'all' || scope === 'minibosses') {
+      if (canRerandomFloor(season, floor, 'minibosses').allowed) {
+        fs.minibosses = rerandomSlotList(
+          fs.minibosses || [],
+          'miniboss',
+          floor,
+          eco.minibossCount,
+          roster,
+          options
+        );
+      }
+    }
+
+    if (scope === 'all' || scope === 'boss') {
+      if (canRerandomFloor(season, floor, 'boss').allowed) {
+        const avoidBossIds = fs.boss && fs.boss.rosterId ? [fs.boss.rosterId] : [];
+        const pickedBoss = pickOpponents(roster, 'boss', floor, 1, {
+          avoidRosterIds: avoidBossIds,
+          rng: options.rng,
+        })[0];
+        fs.boss = {
+          ...pickedBoss,
+          bo3Wins: 0,
+          bo3Losses: 0,
+        };
+      }
+    }
+
+    if (floor === season.currentFloor) {
+      season.floorState = fs;
+    }
+
+    return { floor, scope, floorState: fs };
   }
 
   /**
@@ -196,8 +455,12 @@
           }
 
           floorCleared = true;
+          fs.phase = 'cleared';
+          if (season.floorStates) {
+            season.floorStates[season.currentFloor] = fs;
+          }
+
           if (season.currentFloor >= 7) {
-            fs.phase = 'cleared';
             season.status = 'completed';
             season.title = 'King of Duelist';
             season.completedAt = new Date().toISOString();
@@ -205,7 +468,12 @@
           } else {
             season.currentFloor += 1;
             season.winCounter = 0;
-            season.floorState = createFloorState(season.currentFloor, roster, settings);
+            season.floorState =
+              (season.floorStates && season.floorStates[season.currentFloor]) ||
+              createFloorState(season.currentFloor, roster, settings);
+            if (season.floorStates) {
+              season.floorStates[season.currentFloor] = season.floorState;
+            }
           }
         }
       } else {
@@ -223,6 +491,10 @@
           };
         }
       }
+    }
+
+    if (season.floorStates && season.floorState) {
+      season.floorStates[season.currentFloor] = season.floorState;
     }
 
     return {
@@ -271,7 +543,13 @@
   }
 
   return {
+    pickOpponents,
     createFloorState,
+    createAllFloorStates,
+    ensureFloorStates,
+    getFloorState,
+    canRerandomFloor,
+    rerandomFloor,
     getFloorEconomy,
     getRematchCost,
     recordDuelResult,

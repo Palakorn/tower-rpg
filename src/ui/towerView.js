@@ -2,6 +2,19 @@
   root.YgoTower = root.YgoTower || {};
   root.YgoTower.Views = root.YgoTower.Views || {};
 
+  let selectedFloorState = {
+    seasonId: null,
+    lastCurrentFloor: null,
+    selectedFloor: null,
+  };
+
+  const SCOPE_LABELS = {
+    all: 'ทั้งชั้น',
+    guards: 'ทหารยาม',
+    minibosses: 'มินิบอส',
+    boss: 'บอสประจำชั้น',
+  };
+
   async function openNewSeasonModal() {
     const App = root.YgoTower.App;
     const DB = root.YgoTower.DB;
@@ -68,6 +81,7 @@
 
       const settings = await DB.getSettings();
       const roster = await db.roster.toArray();
+      const floorStates = root.YgoTower.Tower.createAllFloorStates(roster, settings);
       const newSeason = {
         name,
         mode,
@@ -80,7 +94,8 @@
         pendingEvents: [],
         collection,
         playerDeck: starterDeck,
-        floorState: root.YgoTower.Tower.createFloorState(1, roster, settings),
+        floorStates,
+        floorState: floorStates[1],
       };
 
       await DB.saveSeason(newSeason);
@@ -88,6 +103,14 @@
       App.showToast(`เริ่ม ${name} เรียบร้อย!`);
       App.renderCurrentView();
     });
+  }
+
+  function renderRerandomButton({ id, scope, label, check, escapeHtml }) {
+    const disabledAttr = check.allowed ? '' : 'disabled';
+    const titleAttr = check.allowed ? '' : `title="${escapeHtml(check.reason)}"`;
+    const idAttr = id ? `id="${id}"` : '';
+    const scopeAttr = scope ? `data-rerandom-scope="${scope}"` : '';
+    return `<button type="button" class="btn btn-sm" ${idAttr} ${scopeAttr} ${disabledAttr} ${titleAttr}>🎲 ${label}</button>`;
   }
 
   async function renderTowerView(container, state) {
@@ -101,6 +124,7 @@
     const settings = state.settings;
 
     if (!season) {
+      selectedFloorState = { seasonId: null, lastCurrentFloor: null, selectedFloor: null };
       container.innerHTML = `
         <div class="card" style="text-align:center; padding:40px 20px;">
           <h2>🏰 ยินดีต้อนรับสู่ Yu-Gi-Oh! Tower RPG</h2>
@@ -118,32 +142,88 @@
       return;
     }
 
-    const currentFloorMeta = Constants.FLOORS.find((f) => f.floor === season.currentFloor);
-    const fs = season.floorState;
+    const needsMigration =
+      !season.floorStates ||
+      Constants.FLOORS.some((f) => !season.floorStates[f.floor]);
+    if (needsMigration) {
+      const roster = await db.roster.toArray();
+      const { changed } = Tower.ensureFloorStates(season, roster, settings);
+      if (changed) {
+        await DB.saveSeason(season);
+      }
+    }
+
+    const seasonKey = season.id ?? season.createdAt ?? season.name ?? null;
+    if (
+      selectedFloorState.seasonId !== seasonKey ||
+      selectedFloorState.lastCurrentFloor !== season.currentFloor
+    ) {
+      selectedFloorState = {
+        seasonId: seasonKey,
+        lastCurrentFloor: season.currentFloor,
+        selectedFloor: season.currentFloor,
+      };
+    }
+
+    const viewingFloor = selectedFloorState.selectedFloor || season.currentFloor;
+    const isViewingCurrent = viewingFloor === season.currentFloor;
+    const viewingFloorMeta =
+      Constants.FLOORS.find((f) => f.floor === viewingFloor) ||
+      Constants.FLOORS.find((f) => f.floor === season.currentFloor);
+    const fs = Tower.getFloorState(season, viewingFloor) || season.floorState;
+    const isViewingCleared =
+      (season.unlockedFloors || []).includes(viewingFloor) ||
+      fs.phase === 'cleared' ||
+      viewingFloor < season.currentFloor;
 
     const floorSidebarHtml = Constants.FLOORS.slice()
       .reverse()
       .map((f) => {
         const isCurrent = f.floor === season.currentFloor;
         const isCleared = (season.unlockedFloors || []).includes(f.floor);
+        const isViewing = f.floor === viewingFloor;
+        const statusIcon = isCleared ? '✅' : isCurrent ? '⚔️' : '🔒';
+        const viewingBadge = isViewing && !isCurrent ? '<span class="badge">👁️ ดูอยู่</span>' : '';
         return `
-          <div class="floor-item ${isCurrent ? 'active' : ''} ${isCleared ? 'cleared' : ''}">
+          <button
+            type="button"
+            class="floor-item ${isCurrent ? 'active' : ''} ${isCleared ? 'cleared' : ''} ${isViewing ? 'viewing' : ''}"
+            data-select-floor="${f.floor}"
+          >
             <div>
               <strong>ชั้น ${f.floor}: ${App.escapeHtml(f.name)}</strong>
               <div class="muted">${App.escapeHtml(f.era)}</div>
             </div>
-            <span>${isCleared ? '✅' : isCurrent ? '⚔️' : '🔒'}</span>
-          </div>
+            <span style="display:flex; align-items:center; gap:6px;">
+              ${viewingBadge}
+              <span>${statusIcon}</span>
+            </span>
+          </button>
         `;
       })
       .join('');
 
+    let previewBannerHtml = '';
+    if (!isViewingCurrent) {
+      const msg = isViewingCleared
+        ? `✅ คุณกำลังดูข้อมูล<strong>ชั้นที่ ${viewingFloor} (ผ่านแล้ว)</strong> — ไม่สามารถ Re-random หรือต่อสู้ซ้ำได้`
+        : `👁️ คุณกำลังดูข้อมูล<strong>ชั้นที่ ${viewingFloor}</strong> ล่วงหน้า — สามารถกด Re-random คู่ต่อสู้ของชั้นนี้ได้ (เริ่มต่อสู้ได้เมื่อไต่มาถึงชั้นนี้)`;
+      previewBannerHtml = `
+        <div class="alert-box" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:10px; margin-bottom:0;">
+          <span>${msg}</span>
+          <button type="button" class="btn btn-sm btn-gold" id="backToCurrentFloorBtn">
+            ⚔️ กลับไปชั้นปัจจุบัน (ชั้น ${season.currentFloor})
+          </button>
+        </div>
+      `;
+    }
+
     let penaltyHtml = '';
-    if (fs.pendingPenalty) {
+    if (isViewingCurrent && fs.pendingPenalty) {
       const p = fs.pendingPenalty;
       const canAfford = season.dp >= p.rematchCost;
       penaltyHtml = `
-        <div class="alert-box danger">
+        <div class="alert-box danger" style="margin-top:10px; margin-bottom:0;">
           <strong>💥 คุณพ่ายแพ้ให้กับ ${p.role === 'boss' ? 'บอสประจำชั้น' : 'มินิบอส'}!</strong>
           <p class="muted" style="margin:6px 0 10px;">
             เลือกจ่าย <strong>${p.rematchCost} DP</strong> เพื่อขอ Rematch ตัวเดิมทันที หรือกลับไปตีทหารยามใหม่ (มินิบอสที่ชนะแล้วจะยังคง Checkpoint ไว้)
@@ -164,7 +244,7 @@
       return list
         .map((opp, idx) => {
           const isBoss = role === 'boss';
-          const canFight = !fs.pendingPenalty && fs.phase === activePhase && !opp.defeated;
+          const canFight = isViewingCurrent && !fs.pendingPenalty && fs.phase === activePhase && !opp.defeated;
           const bo3Text = isBoss ? `<div class="muted">สกอร์ Bo3: ${opp.bo3Wins} - ${opp.bo3Losses} (ชนะ 2 ใน 3)</div>` : '';
           return `
             <div class="opponent-card ${opp.defeated ? 'defeated' : ''}">
@@ -191,7 +271,31 @@
         .join('');
     };
 
-    const eco = Tower.getFloorEconomy(season.currentFloor, settings);
+    const eco = Tower.getFloorEconomy(viewingFloor, settings);
+    const allCheck = Tower.canRerandomFloor(season, viewingFloor, 'all');
+    const guardsCheck = Tower.canRerandomFloor(season, viewingFloor, 'guards');
+    const minibossesCheck = Tower.canRerandomFloor(season, viewingFloor, 'minibosses');
+    const bossCheck = Tower.canRerandomFloor(season, viewingFloor, 'boss');
+
+    const guardStatusLabel = isViewingCleared
+      ? '— ผ่านแล้ว'
+      : isViewingCurrent
+        ? fs.phase === 'guards'
+          ? '— กำลังสู้'
+          : '— ผ่านแล้ว'
+        : '— รอท้าทาย';
+    const minibossStatusLabel = isViewingCleared
+      ? '— ผ่านแล้ว'
+      : isViewingCurrent && fs.phase === 'minibosses'
+        ? '— กำลังสู้'
+        : isViewingCurrent && (fs.phase === 'boss' || fs.phase === 'cleared')
+          ? '— ผ่านแล้ว'
+          : '';
+    const bossStatusLabel = isViewingCleared
+      ? '— ผ่านแล้ว'
+      : isViewingCurrent && fs.phase === 'boss'
+        ? '— กำลังสู้'
+        : '';
 
     container.innerHTML = `
       <div class="grid-2">
@@ -201,32 +305,67 @@
               <span>🗼 หอคอย 7 ชั้น</span>
               <button class="btn btn-sm" id="newSeasonTopBtn">+ Season ใหม่</button>
             </h3>
+            <p class="muted" style="margin:0 0 10px; font-size:0.82rem;">คลิกเลือกชั้นเพื่อดูคู่ต่อสู้หรือ Re-random แต่ละชั้นได้</p>
             <div class="floor-list">${floorSidebarHtml}</div>
           </div>
         </div>
 
         <div>
           <div class="card">
-            <h2 class="card-title">
-              <span>ชั้นที่ ${currentFloorMeta.floor}: ${App.escapeHtml(currentFloorMeta.name)} (${App.escapeHtml(currentFloorMeta.era)})</span>
-              <span class="badge">ชนะ +${eco.winDp} DP / แพ้ +${eco.lossDp} DP</span>
+            <h2 class="card-title" style="flex-wrap:wrap;">
+              <span>ชั้นที่ ${viewingFloorMeta.floor}: ${App.escapeHtml(viewingFloorMeta.name)} (${App.escapeHtml(viewingFloorMeta.era)})</span>
+              <span style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span class="badge">ชนะ +${eco.winDp} DP / แพ้ +${eco.lossDp} DP</span>
+                ${renderRerandomButton({
+                  id: 'rerandomFloorBtn',
+                  scope: 'all',
+                  label: 'Re-random ทั้งชั้น',
+                  check: allCheck,
+                  escapeHtml: App.escapeHtml,
+                })}
+              </span>
             </h2>
-            <p class="muted">${App.escapeHtml(currentFloorMeta.description)}</p>
+            <p class="muted">${App.escapeHtml(viewingFloorMeta.description)}</p>
+            ${previewBannerHtml}
             ${penaltyHtml}
           </div>
 
           <div class="card">
-            <h3 class="card-title">🛡️ ด่านที่ 1: ทหารเฝ้ายาม (Bo1) ${fs.phase === 'guards' ? '— กำลังสู้' : '— ผ่านแล้ว'}</h3>
+            <h3 class="card-title" style="flex-wrap:wrap;">
+              <span>🛡️ ด่านที่ 1: ทหารเฝ้ายาม (Bo1) ${guardStatusLabel}</span>
+              ${renderRerandomButton({
+                scope: 'guards',
+                label: 'Re-random ทหารยาม',
+                check: guardsCheck,
+                escapeHtml: App.escapeHtml,
+              })}
+            </h3>
             <div class="opponent-grid">${renderOpponents(fs.guards, 'guard', 'guards')}</div>
           </div>
 
           <div class="card">
-            <h3 class="card-title">⚔️ ด่านที่ 2: มินิบอส (Bo1 / Checkpoint) ${fs.phase === 'minibosses' ? '— กำลังสู้' : ''}</h3>
+            <h3 class="card-title" style="flex-wrap:wrap;">
+              <span>⚔️ ด่านที่ 2: มินิบอส (Bo1 / Checkpoint) ${minibossStatusLabel}</span>
+              ${renderRerandomButton({
+                scope: 'minibosses',
+                label: 'Re-random มินิบอส',
+                check: minibossesCheck,
+                escapeHtml: App.escapeHtml,
+              })}
+            </h3>
             <div class="opponent-grid">${renderOpponents(fs.minibosses, 'miniboss', 'minibosses')}</div>
           </div>
 
           <div class="card">
-            <h3 class="card-title">👑 ด่านที่ 3: บอสประจำชั้น (Bo3) ${fs.phase === 'boss' ? '— กำลังสู้' : ''}</h3>
+            <h3 class="card-title" style="flex-wrap:wrap;">
+              <span>👑 ด่านที่ 3: บอสประจำชั้น (Bo3) ${bossStatusLabel}</span>
+              ${renderRerandomButton({
+                scope: 'boss',
+                label: 'Re-random บอส',
+                check: bossCheck,
+                escapeHtml: App.escapeHtml,
+              })}
+            </h3>
             <div class="opponent-grid">${renderOpponents([fs.boss], 'boss', 'boss')}</div>
           </div>
         </div>
@@ -235,7 +374,38 @@
 
     document.getElementById('newSeasonTopBtn').addEventListener('click', openNewSeasonModal);
 
-    if (fs.pendingPenalty) {
+    container.querySelectorAll('[data-select-floor]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selectedFloorState.selectedFloor = Number(btn.dataset.selectFloor);
+        App.renderCurrentView();
+      });
+    });
+
+    const backBtn = document.getElementById('backToCurrentFloorBtn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        selectedFloorState.selectedFloor = season.currentFloor;
+        App.renderCurrentView();
+      });
+    }
+
+    container.querySelectorAll('[data-rerandom-scope]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const scope = btn.dataset.rerandomScope || 'all';
+        try {
+          const roster = await db.roster.toArray();
+          Tower.rerandomFloor(season, viewingFloor, scope, roster, settings);
+          await DB.saveSeason(season);
+          const scopeLabel = SCOPE_LABELS[scope] || scope;
+          App.showToast(`🎲 สุ่มคู่ต่อสู้ชั้นที่ ${viewingFloor} (${scopeLabel}) ใหม่แล้ว!`);
+          App.renderCurrentView();
+        } catch (err) {
+          App.showToast(err.message);
+        }
+      });
+    });
+
+    if (isViewingCurrent && fs.pendingPenalty) {
       document.getElementById('payRematchBtn').addEventListener('click', async () => {
         try {
           Tower.payRematch(season);
