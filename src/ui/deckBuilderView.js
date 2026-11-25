@@ -209,7 +209,7 @@
                   <img src="${App.escapeHtml(card.image_url || '')}" alt="${App.escapeHtml(card.name)}" loading="lazy" />
                   <strong>${App.escapeHtml(card.name)}</strong>
                   <div class="muted">มี ${owned} ใบ • ใช้ ${used}/${maxAllowed}</div>
-                  <div style="display:flex; gap:4px; margin-top:auto;" data-no-inspect>
+                  <div class="deck-tile-actions" data-no-inspect>
                     <button class="btn btn-sm btn-primary" data-add-card="auto:${id}" ${canAdd ? '' : 'disabled'}>+ Deck</button>
                     <button class="btn btn-sm" data-add-card="side:${id}" ${canAdd ? '' : 'disabled'}>+ Side</button>
                   </div>
@@ -249,7 +249,7 @@
     };
 
     container.innerHTML = `
-      <div class="grid-2" style="grid-template-columns: 340px 1fr;">
+      <div class="grid-2 grid-2--deck">
         <div>
           <div class="card">
             <h3 class="card-title" style="flex-wrap:wrap;">
@@ -269,9 +269,11 @@
                 ? `<div class="alert-box danger" style="font-size:0.82rem;">${validation.errors.map((e) => `<div>• ${App.escapeHtml(e)}</div>`).join('')}</div>`
                 : `<div class="alert-box" style="border-color:var(--success); background:rgba(52,211,153,0.1); font-size:0.82rem;">✅ Deck ถูกต้องตามกติกา พร้อม Export ไป MDPro4</div>`
             }
-            ${renderDeckZone('Main Deck (40–60)', 'main', deck.main)}
-            ${renderDeckZone('Extra Deck (≤15)', 'extra', deck.extra)}
-            ${renderDeckZone('Side Deck (≤15)', 'side', deck.side)}
+            <div class="deck-zones-scroll">
+              ${renderDeckZone('Main Deck (40–60)', 'main', deck.main)}
+              ${renderDeckZone('Extra Deck (≤15)', 'extra', deck.extra)}
+              ${renderDeckZone('Side Deck (≤15)', 'side', deck.side)}
+            </div>
           </div>
         </div>
 
@@ -282,7 +284,7 @@
               <button class="btn btn-sm btn-gold" id="exportTrunkBtn" ${ownedIds.length ? '' : 'disabled'}>📥 Export Trunk (.conf)</button>
             </h3>
             <input type="text" id="deckCardSearch" value="${App.escapeHtml(searchQuery)}" placeholder="ค้นหาชื่อการ์ดหรือรหัสการ์ดในคลัง..." style="width:100%; margin-bottom:12px;" />
-            <div class="cards-grid" id="deckCollectionGrid"></div>
+            <div class="cards-grid deck-collection-scroll" id="deckCollectionGrid"></div>
           </div>
         </div>
       </div>

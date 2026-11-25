@@ -105,19 +105,35 @@ body {
 
 .main-container {
   max-width: 1280px;
+  width: 100%;
   margin: 0 auto;
   padding: 20px;
 }
 
 .grid-2 {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
   gap: 20px;
+  align-items: start;
 }
 
-@media (max-width: 860px) {
-  .grid-2 {
-    grid-template-columns: 1fr;
+.grid-2 > * {
+  min-width: 0;
+}
+
+.grid-2.grid-2--deck {
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+}
+
+.grid-2.grid-2--recipes {
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+}
+
+@media (max-width: 900px) {
+  .grid-2,
+  .grid-2.grid-2--deck,
+  .grid-2.grid-2--recipes {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -127,15 +143,23 @@ body {
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .card-title {
   margin: 0 0 12px;
   font-size: 1.05rem;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.card-title > *:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .btn {
@@ -213,6 +237,8 @@ input, select, textarea {
 
 .floor-item {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   text-align: left;
   color: inherit;
   font: inherit;
@@ -328,7 +354,7 @@ input, select, textarea {
 
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
   gap: 10px;
 }
 
@@ -341,6 +367,23 @@ input, select, textarea {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ygo-card-tile strong {
+  overflow-wrap: anywhere;
+}
+
+.deck-tile-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.deck-tile-actions .btn {
+  flex: 1 1 60px;
 }
 
 .ygo-card-tile img {
@@ -377,6 +420,7 @@ input, select, textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
   min-width: 0;
 }
 
@@ -391,6 +435,8 @@ input, select, textarea {
 }
 
 .deck-card-name {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -581,6 +627,7 @@ th, td {
 
 .recipe-list-name {
   font-weight: 600;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -592,6 +639,7 @@ th, td {
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 16px;
+  min-width: 0;
 }
 
 .recipe-zone-header {
@@ -601,7 +649,7 @@ th, td {
 
 .recipe-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(96px, 100%), 1fr));
   gap: 8px;
 }
 
@@ -613,6 +661,8 @@ th, td {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  overflow: hidden;
   cursor: pointer;
   transition: transform 0.12s ease, border-color 0.12s ease;
 }
@@ -637,9 +687,43 @@ th, td {
 .recipe-card-name {
   font-size: 0.72rem;
   line-height: 1.25;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (min-width: 901px) {
+  .deck-zones-scroll {
+    max-height: max(220px, calc(100vh - 260px));
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .deck-collection-scroll {
+    max-height: max(220px, calc(100vh - 290px));
+    overflow-y: auto;
+    align-content: start;
+    padding-right: 4px;
+  }
+
+  .recipe-list-scroll {
+    max-height: max(220px, calc(100vh - 290px));
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .recipe-detail-scroll {
+    max-height: max(220px, calc(100vh - 320px));
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+}
+
+@media (max-width: 640px) {
+  .main-container {
+    padding: 12px;
+  }
 }
 
 /* Sound toggle pill */

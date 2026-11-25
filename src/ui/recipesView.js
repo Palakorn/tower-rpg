@@ -286,7 +286,7 @@
       return `
         <div class="card">
           <div class="card-title" style="flex-wrap:wrap;">
-            <span>📜 ${App.escapeHtml(activeRecipe.name)}</span>
+            <span style="min-width:0; overflow-wrap:anywhere;">📜 ${App.escapeHtml(activeRecipe.name)}</span>
             <div class="form-row" style="margin-bottom:0; gap:6px; flex-wrap:wrap;">
               <button class="btn btn-sm" id="renameRecipeBtn">✏️ เปลี่ยนชื่อ</button>
               <button class="btn btn-sm" id="replaceRecipeYdkBtn">🔄 อัปเดต .ydk</button>
@@ -319,15 +319,17 @@
             </div>
           </div>
 
-          ${renderZoneGrid('Main Deck', evaluation.main)}
-          ${renderZoneGrid('Extra Deck', evaluation.extra)}
-          ${renderZoneGrid('Side Deck', evaluation.side)}
+          <div class="recipe-detail-scroll">
+            ${renderZoneGrid('Main Deck', evaluation.main)}
+            ${renderZoneGrid('Extra Deck', evaluation.extra)}
+            ${renderZoneGrid('Side Deck', evaluation.side)}
+          </div>
         </div>
       `;
     };
 
     container.innerHTML = `
-      <div class="grid-2" style="grid-template-columns: 300px 1fr;">
+      <div class="grid-2 grid-2--recipes">
         <div>
           <div class="card">
             <h3 class="card-title">
@@ -350,7 +352,7 @@
                   : `<div class="muted" style="font-size:0.78rem; margin-top:6px;">รองรับเลือกหลายไฟล์พร้อมกัน หรือเพิ่มจากลิงก์ YDKE (สูงสุด ${maxRecipes} Deck)</div>`
               }
             </div>
-            <div class="floor-list" id="recipeList">${renderRecipeList()}</div>
+            <div class="floor-list recipe-list-scroll" id="recipeList">${renderRecipeList()}</div>
           </div>
         </div>
 
