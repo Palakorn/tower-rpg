@@ -456,7 +456,7 @@
     activeCleanup = cleanupImmediate;
   }
 
-  function showCardPick({ card, onDone }) {
+  function showCardPick({ card, threshold, onDone }) {
     if (activeCleanup) {
       activeCleanup();
       activeCleanup = null;
@@ -473,7 +473,7 @@
     stage.className = 'pick-fx-stage';
     stage.innerHTML = `
       <div class="pick-fx-ring"></div>
-      <div class="pick-fx-badge">🌟 8-WIN MILESTONE REWARD</div>
+      <div class="pick-fx-badge">🌟 ${threshold ? `${escapeHtml(threshold)} EvP` : 'EVP'} MILESTONE REWARD</div>
       <h3 class="pick-fx-title">ได้รับการ์ดรางวัล!</h3>
       <div class="pick-fx-card-wrap">
         <div class="pick-fx-card-aura"></div>

@@ -89,7 +89,7 @@
         createdAt: new Date().toISOString(),
         currentFloor: 1,
         dp,
-        winCounter: 0,
+        eventPoints: 0,
         unlockedFloors: [],
         pendingEvents: [],
         collection,
@@ -144,7 +144,8 @@
 
     const needsMigration =
       !season.floorStates ||
-      Constants.FLOORS.some((f) => !season.floorStates[f.floor]);
+      Constants.FLOORS.some((f) => !season.floorStates[f.floor]) ||
+      typeof season.eventPoints !== 'number';
     if (needsMigration) {
       const roster = await db.roster.toArray();
       const { changed } = Tower.ensureFloorStates(season, roster, settings);
@@ -272,6 +273,7 @@
     };
 
     const eco = Tower.getFloorEconomy(viewingFloor, settings);
+    const eventCfg = Constants.getEventConfig(settings);
     const allCheck = Tower.canRerandomFloor(season, viewingFloor, 'all');
     const guardsCheck = Tower.canRerandomFloor(season, viewingFloor, 'guards');
     const minibossesCheck = Tower.canRerandomFloor(season, viewingFloor, 'minibosses');
@@ -315,7 +317,7 @@
             <h2 class="card-title" style="flex-wrap:wrap;">
               <span>ชั้นที่ ${viewingFloorMeta.floor}: ${App.escapeHtml(viewingFloorMeta.name)} (${App.escapeHtml(viewingFloorMeta.era)})</span>
               <span style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <span class="badge">ชนะ +${eco.winDp} DP / แพ้ +${eco.lossDp} DP</span>
+                <span class="badge">ชนะ +${eco.winDp} DP (+${eventCfg.winEvp} EvP) / แพ้ +${eco.lossDp} DP (+${eventCfg.lossEvp} EvP)</span>
                 ${renderRerandomButton({
                   id: 'rerandomFloorBtn',
                   scope: 'all',
@@ -478,14 +480,25 @@
             App.showToast('🏆 ยินดีด้วย! คุณเคลียร์หอคอยครบ 7 ชั้น ได้รับฉายา King of Duelist!');
           } else if (res.floorCleared) {
             App.showToast(`🎉 ผ่านชั้นที่ ${season.currentFloor - 1} แล้ว! ปลดล็อกซองและขึ้นสู่ชั้นที่ ${season.currentFloor}`);
-          } else if (res.dpEarned > 0) {
-            App.showToast(`${won ? 'ชนะ' : 'แพ้'}! ได้รับ +${res.dpEarned} DP`);
+          } else if (res.dpEarned > 0 || res.evpEarned > 0) {
+            const parts = [];
+            if (res.dpEarned > 0) parts.push(`+${res.dpEarned} DP`);
+            if (res.evpEarned > 0) parts.push(`+${res.evpEarned} EvP`);
+            App.showToast(`${won ? 'ชนะ' : 'แพ้'}! ได้รับ ${parts.join(' / ')}`);
           }
 
-          if (res.triggeredEvent === 'free_pack') {
-            App.showToast('🎁 ครบ 4 ชนะ! ได้รับสิทธิ์เปิดซองฟรีในหน้า ร้านค้า & เปิดซอง');
-          } else if (res.triggeredEvent === 'pick_card') {
-            App.showToast('🌟 ครบ 8 ชนะ! ได้รับสิทธิ์เลือกการ์ดฟรี 1 ใบในหน้า ร้านค้า & เปิดซอง');
+          const triggeredList =
+            res.triggeredEvents || (res.triggeredEvent ? [{ type: res.triggeredEvent }] : []);
+          for (const ev of triggeredList) {
+            if (ev.type === 'free_pack') {
+              App.showToast(
+                `🎁 ครบ ${ev.threshold || eventCfg.packThreshold} EvP! ได้รับสิทธิ์เปิดซองฟรีในหน้า ร้านค้า & เปิดซอง`
+              );
+            } else if (ev.type === 'pick_card') {
+              App.showToast(
+                `🌟 ครบ ${ev.threshold || eventCfg.pickCardThreshold} EvP! ได้รับสิทธิ์เลือกการ์ดฟรี 1 ใบในหน้า ร้านค้า & เปิดซอง`
+              );
+            }
           }
 
           App.renderCurrentView();

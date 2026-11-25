@@ -10,6 +10,7 @@
     const db = DB.getDB();
 
     const settings = state.settings;
+    const eventCfg = root.YgoTower.Constants.getEventConfig(settings);
     const cacheStats = await Api.getCacheStats();
     const allSets = await db.sets.toArray();
 
@@ -53,12 +54,22 @@
       </div>
 
       <div class="card">
-        <h3 class="card-title">⚖️ ตั้งค่าเศรษฐกิจ, Rematch &amp; เรตสุ่มซอง</h3>
+        <h3 class="card-title">⚖️ ตั้งค่าเศรษฐกิจ, Rematch &amp; Event (EvP)</h3>
         <div class="form-row">
           <label>ตัวคูณค่า Rematch มินิบอส (เทียบราคาซอง):</label>
           <input type="number" step="0.1" id="minibossRatioInput" value="${settings.minibossRematchRatio}" style="width:80px" />
           <label>ตัวคูณค่า Rematch บอส:</label>
           <input type="number" step="0.1" id="bossRatioInput" value="${settings.bossRematchRatio}" style="width:80px" />
+        </div>
+        <div class="form-row">
+          <label>EvP ชนะ:</label>
+          <input type="number" min="0" step="1" id="winEvpInput" value="${eventCfg.winEvp}" style="width:70px" />
+          <label>EvP แพ้:</label>
+          <input type="number" min="0" step="1" id="lossEvpInput" value="${eventCfg.lossEvp}" style="width:70px" />
+          <label>เกณฑ์เปิดซองฟรี:</label>
+          <input type="number" min="1" step="1" id="packEvpThresholdInput" value="${eventCfg.packThreshold}" style="width:70px" />
+          <label>เกณฑ์เลือกการ์ด:</label>
+          <input type="number" min="2" step="1" id="pickCardEvpThresholdInput" value="${eventCfg.pickCardThreshold}" style="width:70px" />
         </div>
         <table>
           <thead>
@@ -124,8 +135,32 @@
     });
 
     document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+      const winEvp = Math.floor(Number(document.getElementById('winEvpInput').value));
+      const lossEvp = Math.floor(Number(document.getElementById('lossEvpInput').value));
+      const packThreshold = Math.floor(Number(document.getElementById('packEvpThresholdInput').value));
+      const pickCardThreshold = Math.floor(Number(document.getElementById('pickCardEvpThresholdInput').value));
+
+      if (!Number.isFinite(winEvp) || winEvp < 0 || !Number.isFinite(lossEvp) || lossEvp < 0) {
+        App.showToast('ค่า EvP ชนะ/แพ้ ต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป');
+        return;
+      }
+      if (!Number.isFinite(packThreshold) || packThreshold < 1) {
+        App.showToast('เกณฑ์ EvP เปิดซองฟรี ต้องมีค่าอย่างน้อย 1');
+        return;
+      }
+      if (!Number.isFinite(pickCardThreshold) || pickCardThreshold <= packThreshold) {
+        App.showToast('เกณฑ์ EvP เลือกการ์ด ต้องมากกว่าเกณฑ์เปิดซองฟรี');
+        return;
+      }
+
       settings.minibossRematchRatio = Number(document.getElementById('minibossRatioInput').value) || 0.5;
       settings.bossRematchRatio = Number(document.getElementById('bossRatioInput').value) || 1.0;
+      settings.eventConfig = {
+        winEvp,
+        lossEvp,
+        packThreshold,
+        pickCardThreshold,
+      };
 
       container.querySelectorAll('[data-eco]').forEach((input) => {
         const [floorStr, field] = input.dataset.eco.split(':');

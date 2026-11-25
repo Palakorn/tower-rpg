@@ -150,10 +150,21 @@
     if (res.dpEarned > 0) {
       pills.push(`<span class="battle-fx-pill battle-fx-pill--dp">+${res.dpEarned} DP</span>`);
     }
-    if (res.triggeredEvent === 'free_pack') {
-      pills.push(`<span class="battle-fx-pill battle-fx-pill--event">🎁 ครบ 4 ชนะ! รับซองฟรี</span>`);
-    } else if (res.triggeredEvent === 'pick_card') {
-      pills.push(`<span class="battle-fx-pill battle-fx-pill--event">🌟 ครบ 8 ชนะ! เลือกการ์ดฟรี 1 ใบ</span>`);
+    if (res.evpEarned > 0) {
+      pills.push(`<span class="battle-fx-pill battle-fx-pill--event">+${res.evpEarned} EvP</span>`);
+    }
+    const triggeredList =
+      res.triggeredEvents || (res.triggeredEvent ? [{ type: res.triggeredEvent }] : []);
+    for (const ev of triggeredList) {
+      if (ev.type === 'free_pack') {
+        pills.push(
+          `<span class="battle-fx-pill battle-fx-pill--event">🎁 ครบ ${ev.threshold || 4} EvP! รับซองฟรี</span>`
+        );
+      } else if (ev.type === 'pick_card') {
+        pills.push(
+          `<span class="battle-fx-pill battle-fx-pill--event">🌟 ครบ ${ev.threshold || 8} EvP! เลือกการ์ดฟรี 1 ใบ</span>`
+        );
+      }
     }
     if (!won && !res.dpEarned && bo3Note) {
       pills.push(`<span class="battle-fx-pill battle-fx-pill--muted">ยังเหลือโอกาสพลิกเกมใน Bo3</span>`);

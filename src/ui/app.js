@@ -54,17 +54,23 @@
     if (!s) {
       bar.innerHTML = `<span class="pill">ยังไม่มี Season ที่กำลังเล่น</span>${soundBtnHtml}`;
     } else {
+      const cfg = root.YgoTower.Constants.getEventConfig(state.settings);
+      const evp = root.YgoTower.Tower
+        ? root.YgoTower.Tower.getEventPoints(s)
+        : (s.eventPoints ?? s.winCounter ?? 0);
       const pendingCount = (s.pendingEvents || []).length;
-      const eventPill =
+      const evpPill = `<span class="pill">Event: <strong>${evp}/${cfg.pickCardThreshold} EvP</strong> (${cfg.packThreshold}=ซอง, ${cfg.pickCardThreshold}=เลือกการ์ด)</span>`;
+      const pendingBtn =
         pendingCount > 0
           ? `<button class="pill event-ready" id="headerEventBtn">🎁 รางวัล Event รอรับ (${pendingCount})</button>`
-          : `<span class="pill">Event ชนะ: <strong>${s.winCounter || 0}/8</strong> (4=ซอง, 8=เลือกการ์ด)</span>`;
+          : '';
 
       bar.innerHTML = `
         <span class="pill">Season: <strong>${escapeHtml(s.name)}</strong></span>
         <span class="pill">ชั้น: <strong>${s.currentFloor}/7</strong></span>
         <span class="pill">DP: <strong>${s.dp}</strong></span>
-        ${eventPill}
+        ${evpPill}
+        ${pendingBtn}
         ${soundBtnHtml}
       `;
 

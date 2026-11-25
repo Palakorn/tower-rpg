@@ -243,6 +243,7 @@
     const db = DB.getDB();
 
     const ev = season.pendingEvents[eventIndex];
+    const eventCfg = Constants.getEventConfig(settings);
     const allSets = await db.sets.toArray();
     const eligibleSets = PackSim.getEventEligibleSets(allSets, ev.floor, ev.type);
 
@@ -276,7 +277,7 @@
       };
 
       App.openModal(`
-        <h3 class="card-title">🎁 รางวัลชนะ 4 ครั้ง: เปิดซองฟรี 1 ซอง</h3>
+        <h3 class="card-title">🎁 รางวัลครบ ${ev.threshold || eventCfg.packThreshold} EvP: เปิดซองฟรี 1 ซอง</h3>
         <p class="muted">เลือกซองจาก Pool ชั้น ${ev.floor} (ไม่เกินชั้น ${Math.min(7, ev.floor + 1)})</p>
         <input type="text" id="eventPackSearch" placeholder="ค้นหาชื่อซอง..." style="width:100%; margin-bottom:10px;" />
         <div id="eventPackList" style="max-height:360px; overflow-y:auto;">${renderSetOptions()}</div>
@@ -400,7 +401,7 @@
       const initialView = renderCardChoices();
 
       App.openModal(`
-        <h3 class="card-title">🌟 รางวัลชนะ 8 ครั้ง: เลือกการ์ดที่ต้องการ 1 ใบ</h3>
+        <h3 class="card-title">🌟 รางวัลครบ ${ev.threshold || eventCfg.pickCardThreshold} EvP: เลือกการ์ดที่ต้องการ 1 ใบ</h3>
         <p class="muted" id="eventPickSummary">เลือกการ์ดจากซองใด ชั้นใดก็ได้ หรือการ์ดนอกซองหอคอย (ไม่จำเป็นต้องปลดล็อค) • ${App.escapeHtml(initialView.summaryText)}</p>
         <div class="form-row" style="gap:8px; margin-bottom:10px;">
           <select id="eventCardFloorFilter" style="flex:1; min-width:150px;">${renderFloorOptions()}</select>
@@ -436,6 +437,7 @@
             if (PackEffects && typeof PackEffects.showCardPick === 'function') {
               PackEffects.showCardPick({
                 card: pickedCard,
+                threshold: ev.threshold || eventCfg.pickCardThreshold,
                 onDone: () => {
                   App.showToast('เพิ่มการ์ดรางวัลเข้าคลังเรียบร้อย!');
                   App.renderCurrentView();
@@ -510,6 +512,7 @@
       return;
     }
 
+    const eventCfg = Constants.getEventConfig(settings);
     const pendingEventsHtml = (season.pendingEvents || []).length
       ? `
         <div class="card" style="border-color:var(--gold);">
@@ -519,7 +522,11 @@
               .map(
                 (ev, idx) => `
               <button class="btn btn-gold" data-claim-event="${idx}">
-                ${ev.type === 'free_pack' ? `เปิดซองฟรี (Event 4 ชนะ • ชั้น ${ev.floor})` : `เลือกการ์ดฟรี 1 ใบ (Event 8 ชนะ • ทุกชั้น/ทุกซอง)`}
+                ${
+                  ev.type === 'free_pack'
+                    ? `เปิดซองฟรี (ครบ ${ev.threshold || eventCfg.packThreshold} EvP • ชั้น ${ev.floor})`
+                    : `เลือกการ์ดฟรี 1 ใบ (ครบ ${ev.threshold || eventCfg.pickCardThreshold} EvP • ทุกชั้น/ทุกซอง)`
+                }
               </button>
             `
               )

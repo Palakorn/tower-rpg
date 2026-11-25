@@ -159,6 +159,14 @@
       changed = true;
     }
 
+    if (typeof season.eventPoints !== 'number' || Number.isNaN(season.eventPoints)) {
+      season.eventPoints =
+        typeof season.winCounter === 'number' && !Number.isNaN(season.winCounter)
+          ? Math.max(0, Math.floor(season.winCounter))
+          : 0;
+      changed = true;
+    }
+
     return { floorStates: season.floorStates, changed };
   }
 
@@ -360,29 +368,59 @@
   }
 
   /**
-   * Advance winCounter (cumulative 1..8 per floor) and return any triggered event.
+   * Read season Event Points (EvP), migrating legacy winCounter 1:1 when present.
    */
-  function advanceWinCounter(season) {
-    season.winCounter = (season.winCounter || 0) + 1;
-    let triggeredEvent = null;
+  function getEventPoints(season) {
+    if (!season) return 0;
+    if (typeof season.eventPoints === 'number' && !Number.isNaN(season.eventPoints)) {
+      return Math.max(0, Math.floor(season.eventPoints));
+    }
+    if (typeof season.winCounter === 'number' && !Number.isNaN(season.winCounter)) {
+      return Math.max(0, Math.floor(season.winCounter));
+    }
+    return 0;
+  }
 
-    if (season.winCounter === 4) {
-      triggeredEvent = 'free_pack';
-      season.pendingEvents = season.pendingEvents || [];
-      season.pendingEvents.push({ type: 'free_pack', floor: season.currentFloor });
-    } else if (season.winCounter >= 8) {
-      triggeredEvent = 'pick_card';
-      season.pendingEvents = season.pendingEvents || [];
-      season.pendingEvents.push({ type: 'pick_card', floor: season.currentFloor });
-      season.winCounter = 0; // Reset loop 1..8
+  /**
+   * Advance Event Points (EvP) by delta, triggering free_pack at packThreshold
+   * and pick_card at pickCardThreshold with remainder carried over across cycles.
+   */
+  function advanceEventPoints(season, delta, settings) {
+    const cfg = Constants.getEventConfig(settings);
+    let current = getEventPoints(season);
+    let remainingGain = Math.max(0, Math.floor(Number(delta) || 0));
+    const triggeredEvents = [];
+    const floor = season.currentFloor;
+    season.pendingEvents = season.pendingEvents || [];
+
+    while (remainingGain > 0) {
+      const next = current + remainingGain;
+
+      if (current < cfg.packThreshold && next >= cfg.packThreshold) {
+        const ev = { type: 'free_pack', floor, threshold: cfg.packThreshold };
+        season.pendingEvents.push(ev);
+        triggeredEvents.push(ev);
+      }
+
+      if (next >= cfg.pickCardThreshold) {
+        const ev = { type: 'pick_card', floor, threshold: cfg.pickCardThreshold };
+        season.pendingEvents.push(ev);
+        triggeredEvents.push(ev);
+        remainingGain = next - cfg.pickCardThreshold;
+        current = 0;
+      } else {
+        current = next;
+        remainingGain = 0;
+      }
     }
 
-    return triggeredEvent;
+    season.eventPoints = current;
+    return triggeredEvents;
   }
 
   /**
    * Record a duel game result against a Guard (Bo1), Mini-boss (Bo1), or Boss (Bo3 game).
-   * Returns { dpEarned, triggeredEvent, matchEnded, matchWon, floorCleared, seasonCompleted }.
+   * Returns { dpEarned, evpEarned, triggeredEvent, triggeredEvents, matchEnded, matchWon, floorCleared, seasonCompleted }.
    */
   function recordDuelResult(season, role, index, won, roster, settings) {
     const fs = season.floorState;
@@ -391,8 +429,10 @@
     }
 
     const eco = getFloorEconomy(season.currentFloor, settings);
+    const eventCfg = Constants.getEventConfig(settings);
     let dpEarned = 0;
-    let triggeredEvent = null;
+    let evpEarned = 0;
+    let triggeredEvents = [];
     let matchEnded = false;
     let matchWon = false;
     let floorCleared = false;
@@ -405,7 +445,8 @@
         fs.guards[index].defeated = true;
         dpEarned = eco.winDp;
         season.dp += dpEarned;
-        triggeredEvent = advanceWinCounter(season);
+        evpEarned = eventCfg.winEvp;
+        triggeredEvents = advanceEventPoints(season, evpEarned, settings);
 
         const allGuardsDone = fs.guards.every((g) => g.defeated);
         if (allGuardsDone) {
@@ -415,6 +456,8 @@
       } else {
         dpEarned = eco.lossDp;
         season.dp += dpEarned;
+        evpEarned = eventCfg.lossEvp;
+        triggeredEvents = advanceEventPoints(season, evpEarned, settings);
       }
     } else if (role === 'miniboss') {
       matchEnded = true;
@@ -423,7 +466,8 @@
         fs.minibosses[index].defeated = true;
         dpEarned = eco.winDp;
         season.dp += dpEarned;
-        triggeredEvent = advanceWinCounter(season);
+        evpEarned = eventCfg.winEvp;
+        triggeredEvents = advanceEventPoints(season, evpEarned, settings);
 
         if (fs.minibosses.every((m) => m.defeated)) {
           fs.phase = 'boss';
@@ -431,6 +475,8 @@
       } else {
         dpEarned = eco.lossDp;
         season.dp += dpEarned;
+        evpEarned = eventCfg.lossEvp;
+        triggeredEvents = advanceEventPoints(season, evpEarned, settings);
         fs.pendingPenalty = {
           role: 'miniboss',
           index,
@@ -446,7 +492,8 @@
           fs.boss.defeated = true;
           dpEarned = eco.winDp;
           season.dp += dpEarned;
-          triggeredEvent = advanceWinCounter(season);
+          evpEarned = eventCfg.winEvp;
+          triggeredEvents = advanceEventPoints(season, evpEarned, settings);
 
           // Unlock floor packs
           season.unlockedFloors = season.unlockedFloors || [];
@@ -467,7 +514,6 @@
             seasonCompleted = true;
           } else {
             season.currentFloor += 1;
-            season.winCounter = 0;
             season.floorState =
               (season.floorStates && season.floorStates[season.currentFloor]) ||
               createFloorState(season.currentFloor, roster, settings);
@@ -482,6 +528,8 @@
           matchEnded = true;
           dpEarned = eco.lossDp;
           season.dp += dpEarned;
+          evpEarned = eventCfg.lossEvp;
+          triggeredEvents = advanceEventPoints(season, evpEarned, settings);
           fs.boss.bo3Wins = 0;
           fs.boss.bo3Losses = 0;
           fs.pendingPenalty = {
@@ -497,9 +545,13 @@
       season.floorStates[season.currentFloor] = season.floorState;
     }
 
+    const triggeredEvent = triggeredEvents.length ? triggeredEvents[triggeredEvents.length - 1].type : null;
+
     return {
       dpEarned,
+      evpEarned,
       triggeredEvent,
+      triggeredEvents,
       matchEnded,
       matchWon,
       floorCleared,
@@ -552,6 +604,7 @@
     rerandomFloor,
     getFloorEconomy,
     getRematchCost,
+    getEventPoints,
     recordDuelResult,
     payRematch,
     returnToGuards,

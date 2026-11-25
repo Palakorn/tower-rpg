@@ -143,8 +143,8 @@
 
   /**
    * Filter sets eligible for Event rewards.
-   * - 'free_pack' (4 wins): current floor + at most 1 floor ahead.
-   * - 'pick_card' (8 wins): any pack on any floor, regardless of unlock status.
+   * - 'free_pack' (4 EvP): current floor + at most 1 floor ahead.
+   * - 'pick_card' (8 EvP): any pack on any floor, regardless of unlock status.
    */
   function getEventEligibleSets(allSets, currentFloor, eventType = 'free_pack') {
     const sets = allSets || [];
@@ -185,7 +185,7 @@
   }
 
   /**
-   * Filter cards eligible for the 8-win pick_card reward by floor, set name, and search query.
+   * Filter cards eligible for the pick_card EvP reward by floor, set name, and search query.
    * When both floor and setName are 'all', returns all unique canonical cards from allCards
    * (including side sets, structure/starter decks, and promos outside curated tower packs).
    */

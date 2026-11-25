@@ -241,10 +241,32 @@
     return '';
   }
 
+  const DEFAULT_EVENT_CONFIG = {
+    winEvp: 3,
+    lossEvp: 1,
+    packThreshold: 4,
+    pickCardThreshold: 8,
+  };
+
+  function getEventConfig(settings) {
+    const raw = (settings && settings.eventConfig) || {};
+    const toNonNegInt = (val, fallback) => {
+      const n = Number(val);
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+    };
+    const winEvp = toNonNegInt(raw.winEvp, DEFAULT_EVENT_CONFIG.winEvp);
+    const lossEvp = toNonNegInt(raw.lossEvp, DEFAULT_EVENT_CONFIG.lossEvp);
+    const packThreshold = Math.max(1, toNonNegInt(raw.packThreshold, DEFAULT_EVENT_CONFIG.packThreshold));
+    const rawPick = toNonNegInt(raw.pickCardThreshold, DEFAULT_EVENT_CONFIG.pickCardThreshold);
+    const pickCardThreshold = Math.max(packThreshold + 1, rawPick);
+    return { winEvp, lossEvp, packThreshold, pickCardThreshold };
+  }
+
   const DEFAULT_SETTINGS = {
     id: 'global',
     minibossRematchRatio: 0.5, // 50% of floor pack price
     bossRematchRatio: 1.0, // 100% of floor pack price
+    eventConfig: { ...DEFAULT_EVENT_CONFIG },
     floorEconomy: FLOORS.map((f) => ({
       floor: f.floor,
       packPrice: f.defaultPackPrice,
@@ -294,6 +316,8 @@
     normalizeSetName,
     findCuratedPack,
     getPackImageUrl,
+    DEFAULT_EVENT_CONFIG,
+    getEventConfig,
     DEFAULT_SETTINGS,
     ROLES,
     MAX_RECIPES,
