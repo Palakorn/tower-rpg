@@ -83,8 +83,13 @@
     });
   }
 
-  function openRecipeCardModal(card, ownedCount, neededCount) {
+  async function openRecipeCardModal(card, ownedCount, neededCount, options = {}) {
     const App = root.YgoTower.App;
+    const CardDetailPacks = root.YgoTower.CardDetailPacks;
+    const Constants = root.YgoTower.Constants;
+    const season = options.season || null;
+    const cardMap = options.cardMap || null;
+
     const statPills = [];
     if (card.type) statPills.push(`<span class="badge">${App.escapeHtml(card.type)}</span>`);
     if (card.attribute) statPills.push(`<span class="badge">${App.escapeHtml(card.attribute)}</span>`);
@@ -104,6 +109,21 @@
         ? `<span class="badge" style="border-color:var(--success); color:var(--success);">ครบแล้ว (${ownedCount}/${neededCount})</span>`
         : `<span class="badge" style="border-color:var(--warning); color:var(--warning);">มีในคลัง ${ownedCount}/${neededCount} ใบ (ขาด ${neededCount - ownedCount})</span>`;
 
+    const breakdown = CardDetailPacks
+      ? await CardDetailPacks.loadCardPackBreakdown(card, {
+          season,
+          cardMap,
+          Constants,
+          PackSimulator: root.YgoTower.PackSimulator,
+          DB: root.YgoTower.DB,
+          Api: root.YgoTower.Api,
+        })
+      : null;
+    const packsHtml =
+      CardDetailPacks && breakdown
+        ? CardDetailPacks.renderCardPacksSectionHtml(breakdown, App, Constants)
+        : '';
+
     App.openModal(`
       <div class="pack-detail-modal">
         <div class="form-row" style="justify-content:space-between; margin-bottom:12px;">
@@ -120,12 +140,21 @@
             </div>
             <div class="card-detail-meta">${statPills.join('')}</div>
             <div class="card-detail-desc">${App.escapeHtml(card.desc || 'ไม่มีคำอธิบาย')}</div>
+            ${packsHtml}
           </div>
         </div>
       </div>
     `);
 
     document.getElementById('closeRecipeCardModalBtn').addEventListener('click', () => App.closeModal());
+    if (CardDetailPacks && breakdown) {
+      CardDetailPacks.bindCardPacksSectionEvents(document.getElementById('modalContent') || document, breakdown, {
+        App,
+        Views: root.YgoTower.Views,
+        season,
+        onBackToCardDetail: () => openRecipeCardModal(card, ownedCount, neededCount, { season, cardMap }),
+      });
+    }
   }
 
   function openRenameModal(recipe, onSaved) {
@@ -597,12 +626,12 @@
       });
 
       container.querySelectorAll('[data-recipe-card]').forEach((tile) => {
-        tile.addEventListener('click', () => {
+        tile.addEventListener('click', async () => {
           const id = Number(tile.dataset.recipeCard);
           const card = cardMap.get(id) || { id, name: `Card #${id}`, image_url: '' };
           const ownedCount = Number(collection[String(id)] || 0);
           const neededCount = neededCounts.get(id) || 1;
-          openRecipeCardModal(card, ownedCount, neededCount);
+          await openRecipeCardModal(card, ownedCount, neededCount, { season: state.activeSeason, cardMap });
         });
       });
     }

@@ -20,10 +20,12 @@
     { key: 'common', shortLabel: 'Common', label: 'Common' },
   ];
 
-  function renderCardDetailView(setMeta, item, bucket, season, onBackToPack) {
+  async function renderCardDetailView(setMeta, item, bucket, season, onBackToPack) {
     const App = root.YgoTower.App;
+    const Constants = root.YgoTower.Constants;
+    const CardDetailPacks = root.YgoTower.CardDetailPacks;
     const { card, setEntry } = item;
-    const owned = (season.collection && season.collection[String(card.id)]) || 0;
+    const owned = (season && season.collection && season.collection[String(card.id)]) || 0;
 
     const statPills = [];
     if (card.type) statPills.push(`<span class="badge">${App.escapeHtml(card.type)}</span>`);
@@ -38,6 +40,20 @@
     if (card.def !== null && card.def !== undefined) {
       statPills.push(`<span class="badge">DEF ${card.def}</span>`);
     }
+
+    const breakdown = CardDetailPacks
+      ? await CardDetailPacks.loadCardPackBreakdown(card, {
+          season,
+          Constants,
+          PackSimulator: root.YgoTower.PackSimulator,
+          DB: root.YgoTower.DB,
+          Api: root.YgoTower.Api,
+        })
+      : null;
+    const packsHtml =
+      CardDetailPacks && breakdown
+        ? CardDetailPacks.renderCardPacksSectionHtml(breakdown, App, Constants)
+        : '';
 
     App.openModal(`
       <div class="pack-detail-modal">
@@ -56,13 +72,24 @@
             </div>
             <div class="card-detail-meta">${statPills.join('')}</div>
             <div class="card-detail-desc">${App.escapeHtml(card.desc || 'ไม่มีคำอธิบาย')}</div>
+            ${packsHtml}
           </div>
         </div>
       </div>
     `);
 
-    document.getElementById('backToPackListBtn').addEventListener('click', onBackToPack);
+    document.getElementById('backToPackListBtn').addEventListener('click', async () => {
+      if (typeof onBackToPack === 'function') await onBackToPack();
+    });
     document.getElementById('closeCardDetailBtn').addEventListener('click', () => App.closeModal());
+    if (CardDetailPacks && breakdown) {
+      CardDetailPacks.bindCardPacksSectionEvents(document.getElementById('modalContent') || document, breakdown, {
+        App,
+        Views: root.YgoTower.Views,
+        season,
+        onBackToCardDetail: () => renderCardDetailView(setMeta, item, bucket, season, onBackToPack),
+      });
+    }
   }
 
   async function showPackDetailsModal(setMeta, season, onBack = null) {
@@ -96,7 +123,7 @@
 
           const tilesHtml = items
             .map((item) => {
-              const owned = (season.collection && season.collection[String(item.card.id)]) || 0;
+              const owned = (season && season.collection && season.collection[String(item.card.id)]) || 0;
               return `
                 <div class="ygo-card-tile clickable" data-card-id="${item.card.id}" data-bucket="${g.key}">
                   <img src="${App.escapeHtml(item.card.image_url || '')}" alt="${App.escapeHtml(item.card.name)}" loading="lazy" />
@@ -157,7 +184,9 @@
       document.getElementById('closePackDetailBtn').addEventListener('click', () => App.closeModal());
       const backBtn = document.getElementById('packDetailBackBtn');
       if (backBtn && onBack) {
-        backBtn.addEventListener('click', onBack);
+        backBtn.addEventListener('click', async () => {
+          await onBack();
+        });
       }
 
       document.querySelectorAll('[data-rarity-tab]').forEach((btn) => {
@@ -180,12 +209,12 @@
       });
 
       document.querySelectorAll('#packDetailScroll [data-card-id]').forEach((tile) => {
-        tile.addEventListener('click', () => {
+        tile.addEventListener('click', async () => {
           const cardId = Number(tile.dataset.cardId);
           const bucket = tile.dataset.bucket;
           const item = (buckets[bucket] || []).find((entry) => entry.card.id === cardId);
           if (!item) return;
-          renderCardDetailView(setMeta, item, bucket, season, renderPackContents);
+          await renderCardDetailView(setMeta, item, bucket, season, renderPackContents);
         });
       });
     };
@@ -621,10 +650,10 @@
     });
 
     container.querySelectorAll('[data-view-pack]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const setMeta = floorSets.find((s) => s.set_name === btn.dataset.viewPack);
         if (!setMeta) return;
-        showPackDetailsModal(setMeta, season);
+        await showPackDetailsModal(setMeta, season);
       });
     });
 
@@ -651,4 +680,8 @@
   }
 
   root.YgoTower.Views.renderShopView = renderShopView;
+  root.YgoTower.Views.openPackDetailsModal = showPackDetailsModal;
+  root.YgoTower.Views.setShopFloor = (floor) => {
+    selectedShopFloor = Number(floor) || 1;
+  };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

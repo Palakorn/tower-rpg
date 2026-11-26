@@ -100,11 +100,27 @@
       return true;
     };
 
-    const openDeckCardModal = (id) => {
+    const openDeckCardModal = async (id) => {
+      const CardDetailPacks = root.YgoTower.CardDetailPacks;
+      const Constants = root.YgoTower.Constants;
       const card = cardMap.get(id) || { id, name: `Card #${id}`, type: '', frameType: '', image_url: '' };
       const statPills = buildCardStatPills(card, App);
       const primaryZone = isExtraDeckCard(card) ? 'extra' : 'main';
       const primaryZoneLabel = ZONE_LABELS[primaryZone];
+      const breakdown = CardDetailPacks
+        ? await CardDetailPacks.loadCardPackBreakdown(card, {
+            season,
+            cardMap,
+            Constants,
+            PackSimulator: root.YgoTower.PackSimulator,
+            DB,
+            Api,
+          })
+        : null;
+      const packsHtml =
+        CardDetailPacks && breakdown
+          ? CardDetailPacks.renderCardPacksSectionHtml(breakdown, App, Constants)
+          : '';
       let modalBusy = false;
 
       const renderModal = () => {
@@ -154,12 +170,22 @@
                   <button class="btn btn-sm" data-modal-add="side" ${canAdd ? '' : 'disabled'}>+ Side Deck</button>
                   ${removeButtons}
                 </div>
+                ${packsHtml}
               </div>
             </div>
           </div>
         `);
 
         document.getElementById('closeDeckCardModalBtn').addEventListener('click', () => App.closeModal());
+
+        if (CardDetailPacks && breakdown) {
+          CardDetailPacks.bindCardPacksSectionEvents(document.getElementById('modalContent') || document, breakdown, {
+            App,
+            Views: root.YgoTower.Views,
+            season,
+            onBackToCardDetail: () => openDeckCardModal(id),
+          });
+        }
 
         document.querySelectorAll('[data-modal-add]').forEach((btn) => {
           btn.addEventListener('click', async () => {
@@ -302,9 +328,9 @@
       });
 
       collectionGrid.querySelectorAll('[data-inspect-card]').forEach((tile) => {
-        tile.addEventListener('click', (e) => {
+        tile.addEventListener('click', async (e) => {
           if (e.target.closest('button, [data-no-inspect]')) return;
-          openDeckCardModal(Number(tile.dataset.inspectCard));
+          await openDeckCardModal(Number(tile.dataset.inspectCard));
         });
       });
     };
@@ -513,9 +539,9 @@
     });
 
     container.querySelectorAll('.deck-card-row[data-inspect-card]').forEach((row) => {
-      row.addEventListener('click', (e) => {
+      row.addEventListener('click', async (e) => {
         if (e.target.closest('button')) return;
-        openDeckCardModal(Number(row.dataset.inspectCard));
+        await openDeckCardModal(Number(row.dataset.inspectCard));
       });
     });
   }
