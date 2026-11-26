@@ -1667,3 +1667,131 @@ body.battle-fx-shake {
     transform: scale(1) rotateY(0deg) translateY(0);
   }
 }
+
+.deck-filter-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.deck-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 0.82rem;
+}
+
+.deck-collection-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.card-filter-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card-filter-section {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.card-filter-section-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  padding-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-stats-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-stat-row {
+  display: grid;
+  grid-template-columns: minmax(135px, 1.2fr) 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.filter-stat-label {
+  background: #0b0d13;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.filter-stat-input {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.filter-frames-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.filter-frame-btn {
+  background: #0b0d13;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 10px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.filter-frame-btn:hover {
+  border-color: var(--primary);
+}
+
+.filter-frame-btn.active {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.card-filter-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .card-filter-section {
+    grid-template-columns: 1fr;
+  }
+  .filter-stat-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .filter-stat-label {
+    grid-column: 1 / -1;
+  }
+  .filter-frames-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -3,6 +3,8 @@
   root.YgoTower.Views = root.YgoTower.Views || {};
 
   let searchQuery = '';
+  let collectionFilters = null;
+  let collectionDisplayLimit = 60;
 
   function isExtraDeckCard(card) {
     const t = (card?.frameType || card?.type || '').toLowerCase();
@@ -16,6 +18,12 @@
     if (card.race) pills.push(`<span class="badge">${App.escapeHtml(card.race)}</span>`);
     if (card.level !== null && card.level !== undefined) {
       pills.push(`<span class="badge">LV/Rank ${card.level}</span>`);
+    }
+    if (card.linkval !== null && card.linkval !== undefined) {
+      pills.push(`<span class="badge">Link-${card.linkval}</span>`);
+    }
+    if (card.scale !== null && card.scale !== undefined) {
+      pills.push(`<span class="badge">Scale ${card.scale}</span>`);
     }
     if (card.atk !== null && card.atk !== undefined) {
       pills.push(`<span class="badge">ATK ${card.atk}</span>`);
@@ -217,14 +225,32 @@
       renderModal();
     };
 
-    const buildCollectionHtml = () => {
-      const q = searchQuery.toLowerCase();
-      const filteredOwned = ownedIds
-        .map((id) => ({ id, card: cardMap.get(id), owned: collection[String(id)] }))
-        .filter((item) => item.card.name.toLowerCase().includes(q) || String(item.id).includes(searchQuery))
-        .slice(0, 60);
+    const CardFilter = root.YgoTower.CardFilter;
+    if (CardFilter && !collectionFilters) {
+      collectionFilters = CardFilter.createEmptyFilters();
+    }
 
-      return filteredOwned.length
+    const getFilteredCollectionItems = (filtersOverride = collectionFilters) => {
+      const items = ownedIds.map((id) => ({
+        id,
+        card: cardMap.get(id),
+        owned: collection[String(id)],
+      }));
+      if (CardFilter) {
+        return CardFilter.filterCollectionItems(items, filtersOverride, searchQuery);
+      }
+      const q = searchQuery.toLowerCase();
+      return items.filter(
+        (item) => item.card.name.toLowerCase().includes(q) || String(item.id).includes(searchQuery)
+      );
+    };
+
+    const buildCollectionHtml = () => {
+      const matchedItems = getFilteredCollectionItems();
+      const filteredOwned = matchedItems.slice(0, collectionDisplayLimit);
+      const hasFilters = CardFilter ? CardFilter.countActiveFilters(collectionFilters) > 0 : false;
+
+      const html = filteredOwned.length
         ? filteredOwned
             .map(({ id, card, owned }) => {
               const used = usedCounts.get(id) || 0;
@@ -243,7 +269,15 @@
               `;
             })
             .join('')
-        : `<p class="muted">ไม่พบการ์ดในคลัง (เปิดซองหรือ Import Starter .ydk เพื่อเพิ่มการ์ดเข้าคลัง)</p>`;
+        : hasFilters || searchQuery.trim()
+          ? `<p class="muted">ไม่พบการ์ดที่ตรงกับตัวกรองหรือคำค้นหา</p>`
+          : `<p class="muted">ไม่พบการ์ดในคลัง (เปิดซองหรือ Import Starter .ydk เพื่อเพิ่มการ์ดเข้าคลัง)</p>`;
+
+      return {
+        html,
+        totalMatches: matchedItems.length,
+        visibleCount: filteredOwned.length,
+      };
     };
 
     const renderDeckZone = (title, zoneKey, ids) => {
@@ -309,16 +343,83 @@
               <span>📚 คลังการ์ดของคุณ (${ownedIds.length} แบบ)</span>
               <button class="btn btn-sm btn-gold" id="exportTrunkBtn" ${ownedIds.length ? '' : 'disabled'}>📥 Export Trunk (.conf)</button>
             </h3>
-            <input type="text" id="deckCardSearch" value="${App.escapeHtml(searchQuery)}" placeholder="ค้นหาชื่อการ์ดหรือรหัสการ์ดในคลัง..." style="width:100%; margin-bottom:12px;" />
+            <div class="deck-filter-toolbar">
+              <input type="text" id="deckCardSearch" value="${App.escapeHtml(searchQuery)}" placeholder="ค้นหาชื่อการ์ดหรือรหัสการ์ดในคลัง..." style="flex:1; min-width:0;" />
+              ${
+                CardFilter
+                  ? `<button type="button" class="btn btn-sm" id="openDeckFilterBtn">🎛️ ตัวกรอง</button>`
+                  : ''
+              }
+            </div>
+            <div id="deckFilterSummary" class="deck-filter-summary"></div>
             <div class="cards-grid deck-collection-scroll" id="deckCollectionGrid"></div>
+            <div id="deckCollectionMoreWrap" class="deck-collection-more"></div>
           </div>
         </div>
       </div>
     `;
 
     const collectionGrid = document.getElementById('deckCollectionGrid');
+    const filterBtn = document.getElementById('openDeckFilterBtn');
+    const filterSummaryEl = document.getElementById('deckFilterSummary');
+    const collectionMoreWrap = document.getElementById('deckCollectionMoreWrap');
+
     const renderCollectionGrid = () => {
-      collectionGrid.innerHTML = buildCollectionHtml();
+      const result = buildCollectionHtml();
+      collectionGrid.innerHTML = result.html;
+
+      const activeCount = CardFilter ? CardFilter.countActiveFilters(collectionFilters) : 0;
+      if (filterBtn) {
+        filterBtn.innerHTML = activeCount > 0 ? `🎛️ ตัวกรอง (${activeCount})` : '🎛️ ตัวกรอง';
+        if (activeCount > 0) {
+          filterBtn.classList.add('btn-primary');
+        } else {
+          filterBtn.classList.remove('btn-primary');
+        }
+      }
+
+      if (filterSummaryEl) {
+        const chips = CardFilter ? CardFilter.getActiveFilterChips(collectionFilters) : [];
+        if (activeCount > 0 || searchQuery.trim() || result.totalMatches > result.visibleCount) {
+          const countText =
+            result.totalMatches > result.visibleCount
+              ? `พบ ${result.totalMatches} ใบ (แสดง ${result.visibleCount} ใบแรก)`
+              : `พบ ${result.totalMatches} ใบ`;
+          const chipsHtml = chips.map((c) => `<span class="badge">${App.escapeHtml(c)}</span>`).join('');
+          const clearBtnHtml =
+            activeCount > 0
+              ? `<button type="button" class="btn btn-sm" id="clearDeckFilterBtn">ล้างตัวกรอง</button>`
+              : '';
+          filterSummaryEl.innerHTML = `<span class="muted">${countText}</span>${chipsHtml}${clearBtnHtml}`;
+          const clearBtn = document.getElementById('clearDeckFilterBtn');
+          if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+              collectionFilters = CardFilter.createEmptyFilters();
+              collectionDisplayLimit = 60;
+              renderCollectionGrid();
+            });
+          }
+        } else {
+          filterSummaryEl.innerHTML = '';
+        }
+      }
+
+      if (collectionMoreWrap) {
+        if (result.totalMatches > result.visibleCount) {
+          const remaining = result.totalMatches - result.visibleCount;
+          collectionMoreWrap.innerHTML = `<button type="button" class="btn btn-sm" id="loadMoreCollectionBtn">แสดงเพิ่มเติม (+60 • เหลืออีก ${remaining} ใบ)</button>`;
+          const moreBtn = document.getElementById('loadMoreCollectionBtn');
+          if (moreBtn) {
+            moreBtn.addEventListener('click', () => {
+              collectionDisplayLimit += 60;
+              renderCollectionGrid();
+            });
+          }
+        } else {
+          collectionMoreWrap.innerHTML = '';
+        }
+      }
+
       collectionGrid.querySelectorAll('[data-add-card]').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
@@ -335,10 +436,139 @@
       });
     };
 
+    const openDeckFilterModal = () => {
+      if (!CardFilter) return;
+      let draft = CardFilter.cloneFilters(collectionFilters);
+      let modalOpen = true;
+
+      const statRowsHtml = CardFilter.STAT_FIELDS.map((field) => {
+        const range = draft.stats[field.key] || { min: '', max: '' };
+        return `
+          <div class="filter-stat-row">
+            <div class="filter-stat-label">${App.escapeHtml(field.label)}</div>
+            <input type="number" min="0" inputmode="numeric" class="filter-stat-input" data-filter-stat="${field.key}:min" value="${App.escapeHtml(range.min)}" placeholder="Min" />
+            <input type="number" min="0" inputmode="numeric" class="filter-stat-input" data-filter-stat="${field.key}:max" value="${App.escapeHtml(range.max)}" placeholder="Max" />
+          </div>
+        `;
+      }).join('');
+
+      const framesHtml = CardFilter.CARD_FRAMES.map((frame) => {
+        const isActive = draft.frames.includes(frame.key);
+        return `<button type="button" class="filter-frame-btn${isActive ? ' active' : ''}" data-filter-frame="${frame.key}">${App.escapeHtml(frame.label)}</button>`;
+      }).join('');
+
+      const initialMatchCount = getFilteredCollectionItems(draft).length;
+
+      App.openModal(`
+        <div class="card-filter-modal">
+          <div class="form-row" style="justify-content:space-between; margin-bottom:0;">
+            <h3 style="margin:0;">🎛️ ตัวกรองการ์ดในคลัง</h3>
+            <button type="button" class="btn btn-sm" id="closeDeckFilterModalBtn">ปิด</button>
+          </div>
+          <div class="card-filter-section">
+            <div class="card-filter-section-title">⭐ Stats</div>
+            <div class="filter-stats-rows">${statRowsHtml}</div>
+          </div>
+          <div class="card-filter-section">
+            <div class="card-filter-section-title">🃏 Card Frame</div>
+            <div class="filter-frames-grid">${framesHtml}</div>
+          </div>
+          <div class="card-filter-footer">
+            <span class="muted" id="deckFilterPreviewCount">ตรงเงื่อนไข <strong>${initialMatchCount}</strong> ใบ</span>
+            <div class="form-row" style="margin:0; gap:8px;">
+              <button type="button" class="btn btn-sm" id="resetDeckFilterModalBtn">ล้างค่า</button>
+              <button type="button" class="btn btn-sm" id="cancelDeckFilterModalBtn">ยกเลิก</button>
+              <button type="button" class="btn btn-sm btn-primary" id="applyDeckFilterModalBtn">ตกลง</button>
+            </div>
+          </div>
+        </div>
+      `);
+
+      const previewEl = document.getElementById('deckFilterPreviewCount');
+      const updatePreviewCount = () => {
+        if (!previewEl) return;
+        const count = getFilteredCollectionItems(draft).length;
+        previewEl.innerHTML = `ตรงเงื่อนไข <strong>${count}</strong> ใบ`;
+      };
+
+      const closeFilterModal = () => {
+        modalOpen = false;
+        App.closeModal();
+      };
+
+      document.getElementById('closeDeckFilterModalBtn').addEventListener('click', closeFilterModal);
+      document.getElementById('cancelDeckFilterModalBtn').addEventListener('click', closeFilterModal);
+
+      document.querySelectorAll('[data-filter-stat]').forEach((input) => {
+        input.addEventListener('input', (e) => {
+          const [statKey, bound] = input.dataset.filterStat.split(':');
+          draft.stats[statKey][bound] = e.target.value;
+          updatePreviewCount();
+        });
+      });
+
+      document.querySelectorAll('[data-filter-frame]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const key = btn.dataset.filterFrame;
+          const idx = draft.frames.indexOf(key);
+          if (idx === -1) {
+            draft.frames.push(key);
+            btn.classList.add('active');
+          } else {
+            draft.frames.splice(idx, 1);
+            btn.classList.remove('active');
+          }
+          updatePreviewCount();
+        });
+      });
+
+      document.getElementById('resetDeckFilterModalBtn').addEventListener('click', () => {
+        draft = CardFilter.createEmptyFilters();
+        document.querySelectorAll('[data-filter-stat]').forEach((input) => {
+          input.value = '';
+        });
+        document.querySelectorAll('[data-filter-frame]').forEach((btn) => {
+          btn.classList.remove('active');
+        });
+        updatePreviewCount();
+      });
+
+      document.getElementById('applyDeckFilterModalBtn').addEventListener('click', () => {
+        collectionFilters = CardFilter.cloneFilters(draft);
+        collectionDisplayLimit = 60;
+        closeFilterModal();
+        renderCollectionGrid();
+      });
+
+      // Lazily backfill linkval / scale for any older cached Link/Pendulum cards in collection
+      if (Api && typeof Api.backfillMissingCardStats === 'function') {
+        Api.backfillMissingCardStats(ownedIds.map((id) => cardMap.get(id)).filter(Boolean))
+          .then((updatedMap) => {
+            if (!updatedMap || !updatedMap.size) return;
+            for (const [id, enriched] of updatedMap.entries()) {
+              cardMap.set(id, enriched);
+            }
+            if (modalOpen) {
+              updatePreviewCount();
+            } else {
+              renderCollectionGrid();
+            }
+          })
+          .catch(() => {});
+      }
+    };
+
     renderCollectionGrid();
+
+    if (filterBtn) {
+      filterBtn.addEventListener('click', () => {
+        openDeckFilterModal();
+      });
+    }
 
     document.getElementById('deckCardSearch').addEventListener('input', (e) => {
       searchQuery = e.target.value;
+      collectionDisplayLimit = 60;
       renderCollectionGrid();
     });
 

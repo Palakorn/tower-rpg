@@ -120,6 +120,8 @@
       atk: c.atk ?? null,
       def: c.def ?? null,
       level: c.level ?? null,
+      linkval: c.linkval ?? null,
+      scale: c.scale ?? null,
       card_sets: altImage
         ? []
         : (c.card_sets || []).map((cs) => ({
@@ -283,11 +285,78 @@
     return cardMap;
   }
 
+  /**
+   * Backfill linkval and scale for already-cached Link/Pendulum cards that predate these fields.
+   */
+  async function backfillMissingCardStats(cards) {
+    const updatedMap = new Map();
+    const needsBackfill = [];
+    for (const card of cards || []) {
+      if (!card || !card.id) continue;
+      const ft = String(card.frameType || '').toLowerCase();
+      const tp = String(card.type || '').toLowerCase();
+      const isLink = ft === 'link' || tp.includes('link');
+      const isPendulum = ft.includes('pendulum') || tp.includes('pendulum');
+      const missingLink = isLink && card.linkval === undefined;
+      const missingScale = isPendulum && card.scale === undefined;
+      if (missingLink || missingScale) {
+        needsBackfill.push(card);
+      }
+    }
+    if (!needsBackfill.length) return updatedMap;
+
+    const lookupIds = Array.from(
+      new Set(needsBackfill.map((c) => Number(c.canonicalId || c.id)).filter((id) => Number.isFinite(id) && id > 0))
+    );
+    const fetchedByCanonicalId = new Map();
+    const CHUNK = 50;
+    for (let i = 0; i < lookupIds.length; i += CHUNK) {
+      const chunk = lookupIds.slice(i, i + CHUNK);
+      try {
+        const res = await fetch(`${API_BASE}/cardinfo.php?id=${chunk.join(',')}`);
+        if (!res.ok) continue;
+        const json = await res.json();
+        for (const raw of json.data || []) {
+          fetchedByCanonicalId.set(Number(raw.id), raw);
+        }
+      } catch (err) {
+        console.warn('Backfill card stats fetch failed:', err);
+      }
+    }
+
+    if (!fetchedByCanonicalId.size) return updatedMap;
+
+    const toPut = [];
+    for (const card of needsBackfill) {
+      const canonical = fetchedByCanonicalId.get(Number(card.canonicalId || card.id));
+      if (!canonical) continue;
+      const enriched = {
+        ...card,
+        linkval: canonical.linkval ?? null,
+        scale: canonical.scale ?? null,
+      };
+      updatedMap.set(Number(card.id), enriched);
+      toPut.push(enriched);
+    }
+
+    if (toPut.length > 0) {
+      try {
+        const db = root.YgoTower.DB.getDB();
+        await db.cards.bulkPut(toPut);
+      } catch (err) {
+        console.warn('Backfill card stats DB save failed:', err);
+      }
+    }
+
+    return updatedMap;
+  }
+
   root.YgoTower.Api = {
     syncFromApi,
     getCacheStats,
     getCardsInSet,
     getCardsByIds,
+    backfillMissingCardStats,
     assignFloorByDate,
     filterAndMapCuratedSets,
     migrateCachedSetsIfNeeded,
