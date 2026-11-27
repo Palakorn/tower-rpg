@@ -322,6 +322,8 @@
                 <button class="btn btn-sm btn-gold" id="exportPlayerYdkBtn">📥 Export .ydk</button>
                 <button class="btn btn-sm" id="importPlayerYdkeBtn">📤 Import YDKE</button>
                 <button class="btn btn-sm btn-gold" id="exportPlayerYdkeBtn">📥 Export YDKE</button>
+                <button class="btn btn-sm" id="importPlayerPlaintextBtn">📤 Import Plaintext</button>
+                <button class="btn btn-sm btn-gold" id="exportPlayerPlaintextBtn">📥 Export Plaintext</button>
               </span>
             </h3>
             ${
@@ -648,65 +650,81 @@
       });
     });
 
-    document.getElementById('exportPlayerYdkeBtn').addEventListener('click', async () => {
-      let ydkeUri;
-      try {
-        ydkeUri = Ydk.generateYdke(deck);
-      } catch (err) {
-        App.showToast(err && err.message ? err.message : 'ไม่สามารถสร้างลิงก์ YDKE ได้');
-        return;
-      }
-
-      const copied = await copyTextToClipboard(ydkeUri);
+    const exportTextWithFallback = async ({
+      text,
+      copiedToast,
+      modalTitle,
+      modalDescription,
+      textareaId,
+      textareaRows,
+      copyBtnId,
+      closeBtnId,
+      fallbackCopiedToast,
+    }) => {
+      const copied = await copyTextToClipboard(text);
       if (copied) {
-        App.showToast(`คัดลอกลิงก์ YDKE สำเร็จ (Main ${deck.main.length}, Extra ${deck.extra.length}, Side ${deck.side.length})`);
+        App.showToast(copiedToast);
         return;
       }
 
       App.openModal(`
-        <h3 class="card-title">📥 Export ลิงก์ YDKE</h3>
-        <p class="muted" style="margin-top:0;">ไม่สามารถคัดลอกลง Clipboard อัตโนมัติได้ กรุณาคัดลอกลิงก์ด้านล่าง:</p>
-        <textarea id="exportYdkeTextarea" readonly rows="4" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;">${App.escapeHtml(ydkeUri)}</textarea>
+        <h3 class="card-title">${modalTitle}</h3>
+        <p class="muted" style="margin-top:0;">${modalDescription}</p>
+        <textarea id="${textareaId}" readonly rows="${textareaRows}" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;">${App.escapeHtml(text)}</textarea>
         <div class="form-row" style="justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button type="button" class="btn" id="copyExportYdkeFallbackBtn">📋 คัดลอก</button>
-          <button type="button" class="btn btn-primary" id="closeExportYdkeModalBtn">ปิด</button>
+          <button type="button" class="btn" id="${copyBtnId}">📋 คัดลอก</button>
+          <button type="button" class="btn btn-primary" id="${closeBtnId}">ปิด</button>
         </div>
       `);
 
-      const textarea = document.getElementById('exportYdkeTextarea');
+      const textarea = document.getElementById(textareaId);
       if (textarea) {
         textarea.focus?.();
         textarea.select?.();
       }
-      document.getElementById('copyExportYdkeFallbackBtn').addEventListener('click', async () => {
+      document.getElementById(copyBtnId).addEventListener('click', async () => {
         if (textarea) {
           textarea.focus?.();
           textarea.select?.();
         }
-        const ok = await copyTextToClipboard(ydkeUri);
+        const ok = await copyTextToClipboard(text);
         if (ok) {
-          App.showToast('คัดลอกลิงก์ YDKE สำเร็จ');
+          App.showToast(fallbackCopiedToast);
         } else {
           App.showToast('กรุณากด Ctrl+C / Cmd+C เพื่อคัดลอกด้วยตนเอง');
         }
       });
-      document.getElementById('closeExportYdkeModalBtn').addEventListener('click', () => App.closeModal());
-    });
+      document.getElementById(closeBtnId).addEventListener('click', () => App.closeModal());
+    };
 
-    document.getElementById('importPlayerYdkeBtn').addEventListener('click', () => {
+    const openTextImportModal = ({
+      title,
+      descriptionHtml,
+      textareaId,
+      textareaRows,
+      placeholder,
+      errorBoxId,
+      cancelBtnId,
+      confirmBtnId,
+      failToast,
+      emptyMessage,
+      confirmMessage,
+      getSuccessMessage,
+      resolveDeck,
+    }) => {
       App.openModal(`
-        <h3 class="card-title">📤 Import Deck จากลิงก์ YDKE</h3>
-        <p class="muted" style="margin-top:0;">วางลิงก์รูปแบบ <code>ydke://...</code> เพื่อนำเข้า Deck (ตรวจการ์ดในคลังและจำกัดชื่อละไม่เกิน 3 ใบ)</p>
-        <textarea id="importYdkeTextarea" rows="4" placeholder="ydke://..." style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;"></textarea>
-        <div id="importYdkeErrorBox"></div>
+        <h3 class="card-title">${title}</h3>
+        <p class="muted" style="margin-top:0;">${descriptionHtml}</p>
+        <textarea id="${textareaId}" rows="${textareaRows}" placeholder="${App.escapeHtml(placeholder)}" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;"></textarea>
+        <div id="${errorBoxId}"></div>
         <div class="form-row" style="justify-content:flex-end; gap:8px; margin-top:12px;">
-          <button type="button" class="btn" id="cancelImportYdkeBtn">ยกเลิก</button>
-          <button type="button" class="btn btn-primary" id="confirmImportYdkeBtn">นำเข้า Deck</button>
+          <button type="button" class="btn" id="${cancelBtnId}">ยกเลิก</button>
+          <button type="button" class="btn btn-primary" id="${confirmBtnId}">นำเข้า Deck</button>
         </div>
       `);
 
-      const textarea = document.getElementById('importYdkeTextarea');
-      const errorBox = document.getElementById('importYdkeErrorBox');
+      const textarea = document.getElementById(textareaId);
+      const errorBox = document.getElementById(errorBoxId);
       let importBusy = false;
 
       if (textarea) {
@@ -722,35 +740,162 @@
         `;
       };
 
-      document.getElementById('cancelImportYdkeBtn').addEventListener('click', () => App.closeModal());
-      document.getElementById('confirmImportYdkeBtn').addEventListener('click', async () => {
+      document.getElementById(cancelBtnId).addEventListener('click', () => App.closeModal());
+      document.getElementById(confirmBtnId).addEventListener('click', async () => {
         if (importBusy) return;
         importBusy = true;
         if (errorBox) errorBox.innerHTML = '';
 
         try {
-          let importedDeck;
-          try {
-            importedDeck = Ydk.parseYdke(textarea ? textarea.value : '');
-          } catch (err) {
-            App.showToast('ไม่สามารถ Import YDKE ได้');
-            showErrorList([err && err.message ? err.message : 'รูปแบบลิงก์ YDKE ไม่ถูกต้อง']);
+          const result = await resolveDeck(textarea ? textarea.value : '');
+          if (result.errors && result.errors.length) {
+            App.showToast(failToast);
+            showErrorList(result.errors);
             return;
           }
 
+          const importedDeck = result.deck;
           await applyImportedDeck(importedDeck, {
-            emptyMessage: 'ไม่พบการ์ดในลิงก์ YDKE นี้',
-            confirmMessage: 'Deck ปัจจุบันมีการ์ดอยู่แล้ว ต้องการนำเข้า YDKE เพื่อแทนที่หรือไม่?',
-            successMessage: `Import YDKE สำเร็จ (Main ${importedDeck.main.length}, Extra ${importedDeck.extra.length}, Side ${importedDeck.side.length})`,
+            emptyMessage,
+            confirmMessage,
+            successMessage: getSuccessMessage(importedDeck),
             beforeRender: () => App.closeModal(),
             onValidationError: (errors) => {
-              App.showToast('ไม่สามารถ Import YDKE ได้');
+              App.showToast(failToast);
               showErrorList(errors);
             },
           });
         } finally {
           importBusy = false;
         }
+      });
+    };
+
+    document.getElementById('exportPlayerYdkeBtn').addEventListener('click', async () => {
+      let ydkeUri;
+      try {
+        ydkeUri = Ydk.generateYdke(deck);
+      } catch (err) {
+        App.showToast(err && err.message ? err.message : 'ไม่สามารถสร้างลิงก์ YDKE ได้');
+        return;
+      }
+
+      await exportTextWithFallback({
+        text: ydkeUri,
+        copiedToast: `คัดลอกลิงก์ YDKE สำเร็จ (Main ${deck.main.length}, Extra ${deck.extra.length}, Side ${deck.side.length})`,
+        modalTitle: '📥 Export ลิงก์ YDKE',
+        modalDescription: 'ไม่สามารถคัดลอกลง Clipboard อัตโนมัติได้ กรุณาคัดลอกลิงก์ด้านล่าง:',
+        textareaId: 'exportYdkeTextarea',
+        textareaRows: 4,
+        copyBtnId: 'copyExportYdkeFallbackBtn',
+        closeBtnId: 'closeExportYdkeModalBtn',
+        fallbackCopiedToast: 'คัดลอกลิงก์ YDKE สำเร็จ',
+      });
+    });
+
+    document.getElementById('importPlayerYdkeBtn').addEventListener('click', () => {
+      openTextImportModal({
+        title: '📤 Import Deck จากลิงก์ YDKE',
+        descriptionHtml: 'วางลิงก์รูปแบบ <code>ydke://...</code> เพื่อนำเข้า Deck (ตรวจการ์ดในคลังและจำกัดชื่อละไม่เกิน 3 ใบ)',
+        textareaId: 'importYdkeTextarea',
+        textareaRows: 4,
+        placeholder: 'ydke://...',
+        errorBoxId: 'importYdkeErrorBox',
+        cancelBtnId: 'cancelImportYdkeBtn',
+        confirmBtnId: 'confirmImportYdkeBtn',
+        failToast: 'ไม่สามารถ Import YDKE ได้',
+        emptyMessage: 'ไม่พบการ์ดในลิงก์ YDKE นี้',
+        confirmMessage: 'Deck ปัจจุบันมีการ์ดอยู่แล้ว ต้องการนำเข้า YDKE เพื่อแทนที่หรือไม่?',
+        getSuccessMessage: (importedDeck) =>
+          `Import YDKE สำเร็จ (Main ${importedDeck.main.length}, Extra ${importedDeck.extra.length}, Side ${importedDeck.side.length})`,
+        resolveDeck: async (rawValue) => {
+          try {
+            return { deck: Ydk.parseYdke(rawValue), errors: [] };
+          } catch (err) {
+            return { deck: null, errors: [err && err.message ? err.message : 'รูปแบบลิงก์ YDKE ไม่ถูกต้อง'] };
+          }
+        },
+      });
+    });
+
+    document.getElementById('exportPlayerPlaintextBtn').addEventListener('click', async () => {
+      const plaintext = Ydk.generatePlaintextDeck(deck, cardMap);
+      await exportTextWithFallback({
+        text: plaintext,
+        copiedToast: `คัดลอก Deck Plaintext สำเร็จ (Main ${deck.main.length}, Extra ${deck.extra.length}, Side ${deck.side.length})`,
+        modalTitle: '📥 Export Deck Plaintext',
+        modalDescription: 'ไม่สามารถคัดลอกลง Clipboard อัตโนมัติได้ กรุณาคัดลอกรายชื่อการ์ดด้านล่าง:',
+        textareaId: 'exportPlaintextTextarea',
+        textareaRows: 10,
+        copyBtnId: 'copyExportPlaintextFallbackBtn',
+        closeBtnId: 'closeExportPlaintextModalBtn',
+        fallbackCopiedToast: 'คัดลอก Deck Plaintext สำเร็จ',
+      });
+    });
+
+    document.getElementById('importPlayerPlaintextBtn').addEventListener('click', () => {
+      openTextImportModal({
+        title: '📤 Import Deck จาก Plaintext',
+        descriptionHtml:
+          'วางรายชื่อการ์ดรูปแบบ <code>จำนวน ชื่อการ์ด</code> แยกตามโซน <code>Main Deck:</code>, <code>Extra Deck:</code>, <code>Side Deck:</code>',
+        textareaId: 'importPlaintextTextarea',
+        textareaRows: 10,
+        placeholder: 'Main Deck:\n2 Dark Magician\n\nExtra Deck:\n1 Road Warrior\n\nSide Deck:\n3 Nitro Warrior',
+        errorBoxId: 'importPlaintextErrorBox',
+        cancelBtnId: 'cancelImportPlaintextBtn',
+        confirmBtnId: 'confirmImportPlaintextBtn',
+        failToast: 'ไม่สามารถ Import Plaintext ได้',
+        emptyMessage: 'ไม่พบการ์ดในข้อความนี้',
+        confirmMessage: 'Deck ปัจจุบันมีการ์ดอยู่แล้ว ต้องการนำเข้า Plaintext เพื่อแทนที่หรือไม่?',
+        getSuccessMessage: (importedDeck) =>
+          `Import Plaintext สำเร็จ (Main ${importedDeck.main.length}, Extra ${importedDeck.extra.length}, Side ${importedDeck.side.length})`,
+        resolveDeck: async (rawValue) => {
+          let parsed;
+          try {
+            parsed = Ydk.parsePlaintextDeck(rawValue);
+          } catch (err) {
+            return { deck: null, errors: [err && err.message ? err.message : 'รูปแบบ Plaintext ไม่ถูกต้อง'] };
+          }
+
+          if (parsed.main.length + parsed.extra.length + parsed.side.length === 0) {
+            return { deck: null, errors: ['ไม่พบการ์ดในข้อความนี้'] };
+          }
+
+          const cardsByName = new Map();
+          const ownedCards = [];
+          for (const id of ownedIds) {
+            const c = cardMap.get(id);
+            if (c && c.name) {
+              ownedCards.push(c);
+              const key = String(c.name).trim().replace(/\s+/g, ' ').toLowerCase();
+              if (!cardsByName.has(key)) cardsByName.set(key, c);
+            }
+          }
+
+          const requestedNames = [...parsed.main, ...parsed.extra, ...parsed.side].map((e) => e.name);
+          const uncachedNames = requestedNames.filter(
+            (name) => !cardsByName.has(String(name).trim().replace(/\s+/g, ' ').toLowerCase())
+          );
+
+          if (uncachedNames.length > 0 && Api && typeof Api.getCardsByNames === 'function') {
+            const fetchedByName = await Api.getCardsByNames(uncachedNames);
+            if (fetchedByName) {
+              for (const [key, card] of fetchedByName.entries()) {
+                cardsByName.set(key, card);
+              }
+            }
+          }
+
+          const resolved = Ydk.resolvePlaintextDeck(parsed, { cardsByName, ownedCards, collection });
+          if (resolved.missingNames.length > 0) {
+            return {
+              deck: null,
+              errors: resolved.missingNames.map((name) => `ไม่พบการ์ดชื่อ "${name}" ในฐานข้อมูล`),
+            };
+          }
+
+          return { deck: resolved.deck, errors: [] };
+        },
       });
     });
 

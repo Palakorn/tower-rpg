@@ -286,6 +286,101 @@
   }
 
   /**
+   * Resolve card metadata by exact card names (case-insensitive),
+   * checking IndexedDB cache first and falling back to YGOPRODeck API.
+   * Returns Map<lowercaseName, canonicalCard>.
+   */
+  async function getCardsByNames(names) {
+    const db = root.YgoTower.DB.getDB();
+    const cleaned = Array.from(
+      new Set(
+        (names || [])
+          .map((n) => String(n ?? '').trim().replace(/\s+/g, ' '))
+          .filter(Boolean)
+      )
+    );
+    const result = new Map();
+    if (!cleaned.length) return result;
+
+    const remainingLower = new Set(cleaned.map((n) => n.toLowerCase()));
+    const preferCanonical = (key, candidate) => {
+      if (!candidate || !candidate.name) return;
+      const prev = result.get(key);
+      const isCanonical = !candidate.canonicalId || Number(candidate.canonicalId) === Number(candidate.id);
+      if (!prev || (isCanonical && prev.canonicalId && Number(prev.canonicalId) !== Number(prev.id))) {
+        result.set(key, candidate);
+      }
+    };
+
+    try {
+      const cachedMatches = await db.cards.where('name').anyOfIgnoreCase(cleaned).toArray();
+      for (const c of cachedMatches) {
+        if (!c || !c.name) continue;
+        const key = c.name.trim().replace(/\s+/g, ' ').toLowerCase();
+        if (remainingLower.has(key)) {
+          preferCanonical(key, c);
+        }
+      }
+    } catch (err) {
+      console.warn('IndexedDB card name lookup failed:', err);
+    }
+
+    const missingNames = cleaned.filter((n) => !result.has(n.toLowerCase()));
+    if (missingNames.length > 0) {
+      const toCache = [];
+      const CHUNK = 30;
+      const fetchAndStore = async (nameList) => {
+        const query = nameList.map((n) => encodeURIComponent(n)).join('|');
+        const res = await fetch(`${API_BASE}/cardinfo.php?name=${query}`);
+        if (!res.ok) return false;
+        const json = await res.json();
+        for (const c of json.data || []) {
+          const entry = toCompactCard(c);
+          const key = entry.name.trim().replace(/\s+/g, ' ').toLowerCase();
+          preferCanonical(key, entry);
+          toCache.push(entry);
+          if (Array.isArray(c.card_images)) {
+            for (const img of c.card_images) {
+              if (img && img.id && img.id !== c.id) {
+                toCache.push(toCompactCard(c, img));
+              }
+            }
+          }
+        }
+        return true;
+      };
+
+      for (let i = 0; i < missingNames.length; i += CHUNK) {
+        const chunk = missingNames.slice(i, i + CHUNK);
+        try {
+          const ok = await fetchAndStore(chunk);
+          if (!ok && chunk.length > 1) {
+            for (const singleName of chunk) {
+              try {
+                await fetchAndStore([singleName]);
+              } catch {
+                // ignore single lookup failure
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('On-demand card name fetch failed:', err);
+        }
+      }
+
+      if (toCache.length > 0) {
+        try {
+          await db.cards.bulkPut(toCache);
+        } catch (err) {
+          console.warn('Caching fetched cards by name failed:', err);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Backfill linkval and scale for already-cached Link/Pendulum cards that predate these fields.
    */
   async function backfillMissingCardStats(cards) {
@@ -356,6 +451,7 @@
     getCacheStats,
     getCardsInSet,
     getCardsByIds,
+    getCardsByNames,
     backfillMissingCardStats,
     assignFloorByDate,
     filterAndMapCuratedSets,

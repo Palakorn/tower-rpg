@@ -146,6 +146,168 @@
     return `ydke://${main}!${extra}!${side}!`;
   }
 
+  const PLAINTEXT_SECTION_RE =
+    /^(?:[-=]+\s*)?(main|extra|side)(?:\s+deck)?(?:\s*\(\s*\d+\s*\))?\s*:?(?:\s*[-=]+)?$/i;
+  const PLAINTEXT_CARD_RE = /^(\d+)(?:\s*[x×])?\s+(.+)$/i;
+
+  /**
+   * Parse a plaintext decklist string into { main, extra, side } arrays of { count, name }.
+   * Supports headers like "Main Deck:", "Extra Deck:", "Side DecK:" (case-insensitive)
+   * and card lines like "2 Dark Magician" or "3  Nitro Warrior".
+   * @param {string} text
+   */
+  function parsePlaintextDeck(text) {
+    const raw = String(text ?? '');
+    if (!raw.trim()) {
+      throw new Error('กรุณากรอกรายชื่อการ์ดรูปแบบ Plaintext');
+    }
+
+    const deck = { main: [], extra: [], side: [] };
+    let section = 'main';
+    const lines = raw.split(/\r?\n/);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      if (line.startsWith('#') || line.startsWith('//')) continue;
+
+      const secMatch = line.match(PLAINTEXT_SECTION_RE);
+      if (secMatch) {
+        section = secMatch[1].toLowerCase();
+        continue;
+      }
+
+      const cardMatch = line.match(PLAINTEXT_CARD_RE);
+      if (!cardMatch) {
+        throw new Error(
+          `รูปแบบบรรทัดที่ ${i + 1} ไม่ถูกต้อง: "${line}" (ต้องเป็น "<จำนวน> <ชื่อการ์ด>" เช่น "2 Dark Magician")`
+        );
+      }
+
+      const count = parseInt(cardMatch[1], 10);
+      if (!Number.isInteger(count) || count <= 0) {
+        throw new Error(`จำนวนการ์ดในบรรทัดที่ ${i + 1} ต้องมากกว่า 0: "${line}"`);
+      }
+      if (count > 60) {
+        throw new Error(`จำนวนการ์ดในบรรทัดที่ ${i + 1} มากเกินไป (${count} ใบ): "${line}"`);
+      }
+
+      const name = cardMatch[2].trim().replace(/\s+/g, ' ');
+      if (!name) {
+        throw new Error(`ไม่พบชื่อการ์ดในบรรทัดที่ ${i + 1}: "${line}"`);
+      }
+
+      deck[section].push({ count, name });
+    }
+
+    return deck;
+  }
+
+  function getCardFromLookup(cardLookup, id) {
+    if (!cardLookup) return null;
+    if (typeof cardLookup.get === 'function') {
+      return cardLookup.get(id) || cardLookup.get(String(id)) || null;
+    }
+    return cardLookup[id] || cardLookup[String(id)] || null;
+  }
+
+  function formatPlaintextZone(header, ids, cardLookup) {
+    if (!Array.isArray(ids) || ids.length === 0) return '';
+    const counts = new Map();
+    for (const id of ids) {
+      const card = getCardFromLookup(cardLookup, id);
+      const name = card && card.name ? String(card.name).trim() : `Card #${id}`;
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    const lines = [header];
+    for (const [name, count] of counts.entries()) {
+      lines.push(`${count} ${name}`);
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * Generate a plaintext decklist ("<count> <card name>" grouped by zone) from { main, extra, side }.
+   * @param {{ main?: number[], extra?: number[], side?: number[] }} deck
+   * @param {Map<number, { name: string }>|Record<string, { name: string }>} [cardLookup]
+   */
+  function generatePlaintextDeck(deck, cardLookup) {
+    const main = (deck && deck.main) || [];
+    const extra = (deck && deck.extra) || [];
+    const side = (deck && deck.side) || [];
+
+    const sections = [
+      formatPlaintextZone('Main Deck:', main, cardLookup),
+      formatPlaintextZone('Extra Deck:', extra, cardLookup),
+      formatPlaintextZone('Side Deck:', side, cardLookup),
+    ].filter(Boolean);
+
+    if (sections.length === 0) {
+      return 'Main Deck:\n\nExtra Deck:\n\nSide Deck:';
+    }
+    return sections.join('\n\n');
+  }
+
+  /**
+   * Resolve parsed plaintext entries into numeric passcode arrays per zone.
+   * Allocates owned card IDs first (supporting alternate artworks) when ownedCards/collection are provided.
+   * @param {{ main: Array<{count:number,name:string}>, extra: Array<{count:number,name:string}>, side: Array<{count:number,name:string}> }} parsedDeck
+   * @param {{ cardsByName?: Map<string, { id: number, name: string }>, ownedCards?: Array<{ id: number, name: string }>, collection?: Record<string, number> }} [options]
+   */
+  function resolvePlaintextDeck(parsedDeck, options = {}) {
+    const cardsByName = options.cardsByName instanceof Map ? options.cardsByName : new Map();
+    const collection = options.collection || {};
+    const ownedBuckets = new Map();
+
+    if (Array.isArray(options.ownedCards)) {
+      for (const c of options.ownedCards) {
+        if (!c || !c.id || !c.name) continue;
+        const owned = Math.floor(Number(collection[String(c.id)]) || 0);
+        if (owned <= 0) continue;
+        const key = String(c.name).trim().replace(/\s+/g, ' ').toLowerCase();
+        if (!ownedBuckets.has(key)) ownedBuckets.set(key, []);
+        ownedBuckets.get(key).push({ id: Number(c.id), remaining: owned });
+      }
+    }
+
+    const deck = { main: [], extra: [], side: [] };
+    const missingNames = [];
+    const seenMissing = new Set();
+
+    for (const zone of ['main', 'extra', 'side']) {
+      for (const entry of (parsedDeck && parsedDeck[zone]) || []) {
+        const key = String(entry.name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        const buckets = ownedBuckets.get(key);
+        const canonical = cardsByName.get(key);
+        const fallbackId = canonical ? Number(canonical.id) : buckets && buckets.length ? buckets[0].id : null;
+
+        if (!fallbackId) {
+          if (!seenMissing.has(key)) {
+            seenMissing.add(key);
+            missingNames.push(entry.name);
+          }
+          continue;
+        }
+
+        for (let i = 0; i < entry.count; i++) {
+          let chosenId = null;
+          if (buckets) {
+            for (const b of buckets) {
+              if (b.remaining > 0) {
+                b.remaining -= 1;
+                chosenId = b.id;
+                break;
+              }
+            }
+          }
+          deck[zone].push(chosenId || fallbackId);
+        }
+      }
+    }
+
+    return { deck, missingNames };
+  }
+
   /**
    * Generate an MDPro4 trunk whitelist (.lflist.conf) string from a card collection.
    * Limits each card count to 1-3 copies.
@@ -362,6 +524,9 @@
     generateYdk,
     parseYdke,
     generateYdke,
+    parsePlaintextDeck,
+    generatePlaintextDeck,
+    resolvePlaintextDeck,
     generateTrunk,
     addDeckToCollection,
     validateDeck,

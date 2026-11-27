@@ -21,14 +21,28 @@
     }
   }
 
-  function openYdkeInputModal({ title, description, showNameInput, defaultName, submitLabel, onSubmit }) {
+  function openRecipeTextModal({
+    title,
+    description,
+    showNameInput,
+    defaultName,
+    submitLabel,
+    placeholder = 'ydke://...',
+    rows = 4,
+    nameInputId = 'recipeYdkeNameInput',
+    textareaId = 'recipeYdkeTextarea',
+    errorBoxId = 'recipeYdkeErrorBox',
+    cancelBtnId = 'cancelRecipeYdkeBtn',
+    confirmBtnId = 'confirmRecipeYdkeBtn',
+    onSubmit,
+  }) {
     const App = root.YgoTower.App;
 
     const nameFieldHtml = showNameInput
       ? `
         <div style="margin-bottom:10px;">
-          <label for="recipeYdkeNameInput" style="display:block; font-size:0.85rem; margin-bottom:4px;">ชื่อ Recipe (เว้นว่างจะตั้งเป็น ${App.escapeHtml(defaultName)})</label>
-          <input type="text" id="recipeYdkeNameInput" maxlength="80" placeholder="${App.escapeHtml(defaultName)}" style="width:100%; box-sizing:border-box;" />
+          <label for="${nameInputId}" style="display:block; font-size:0.85rem; margin-bottom:4px;">ชื่อ Recipe (เว้นว่างจะตั้งเป็น ${App.escapeHtml(defaultName)})</label>
+          <input type="text" id="${nameInputId}" maxlength="80" placeholder="${App.escapeHtml(defaultName)}" style="width:100%; box-sizing:border-box;" />
         </div>
       `
       : '';
@@ -37,17 +51,17 @@
       <h3 class="card-title">${App.escapeHtml(title)}</h3>
       <p class="muted" style="margin-top:0;">${description}</p>
       ${nameFieldHtml}
-      <textarea id="recipeYdkeTextarea" rows="4" placeholder="ydke://..." style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;"></textarea>
-      <div id="recipeYdkeErrorBox"></div>
+      <textarea id="${textareaId}" rows="${rows}" placeholder="${App.escapeHtml(placeholder)}" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;"></textarea>
+      <div id="${errorBoxId}"></div>
       <div class="form-row" style="justify-content:flex-end; gap:8px; margin-top:12px;">
-        <button type="button" class="btn" id="cancelRecipeYdkeBtn">ยกเลิก</button>
-        <button type="button" class="btn btn-primary" id="confirmRecipeYdkeBtn">${App.escapeHtml(submitLabel)}</button>
+        <button type="button" class="btn" id="${cancelBtnId}">ยกเลิก</button>
+        <button type="button" class="btn btn-primary" id="${confirmBtnId}">${App.escapeHtml(submitLabel)}</button>
       </div>
     `);
 
-    const nameInput = showNameInput ? document.getElementById('recipeYdkeNameInput') : null;
-    const textarea = document.getElementById('recipeYdkeTextarea');
-    const errorBox = document.getElementById('recipeYdkeErrorBox');
+    const nameInput = showNameInput ? document.getElementById(nameInputId) : null;
+    const textarea = document.getElementById(textareaId);
+    const errorBox = document.getElementById(errorBoxId);
     let busy = false;
 
     if (nameInput) {
@@ -56,17 +70,18 @@
       textarea.focus?.();
     }
 
-    const showError = (msg) => {
+    const showErrors = (messages) => {
       if (!errorBox) return;
+      const list = Array.isArray(messages) ? messages : [messages];
       errorBox.innerHTML = `
         <div class="alert-box danger" style="max-height:200px; overflow-y:auto; font-size:0.85rem; margin-top:10px;">
-          <div>• ${App.escapeHtml(msg)}</div>
+          ${list.map((msg) => `<div>• ${App.escapeHtml(msg)}</div>`).join('')}
         </div>
       `;
     };
 
-    document.getElementById('cancelRecipeYdkeBtn').addEventListener('click', () => App.closeModal());
-    document.getElementById('confirmRecipeYdkeBtn').addEventListener('click', async () => {
+    document.getElementById(cancelBtnId).addEventListener('click', () => App.closeModal());
+    document.getElementById(confirmBtnId).addEventListener('click', async () => {
       if (busy) return;
       busy = true;
       if (errorBox) errorBox.innerHTML = '';
@@ -74,13 +89,88 @@
       try {
         await onSubmit({
           rawUri: textarea ? textarea.value : '',
+          rawText: textarea ? textarea.value : '',
           rawName: nameInput ? nameInput.value : '',
-          showError,
+          showError: showErrors,
         });
       } finally {
         busy = false;
       }
     });
+  }
+
+  async function resolveRecipePlaintext(rawText, Ydk, Api) {
+    let parsed;
+    try {
+      parsed = Ydk.parsePlaintextDeck(rawText);
+    } catch (err) {
+      return { deck: null, errors: [err && err.message ? err.message : 'รูปแบบ Plaintext ไม่ถูกต้อง'] };
+    }
+
+    if (parsed.main.length + parsed.extra.length + parsed.side.length === 0) {
+      return { deck: null, errors: ['ไม่พบการ์ดในข้อความ Plaintext นี้'] };
+    }
+
+    const names = [...parsed.main, ...parsed.extra, ...parsed.side].map((e) => e.name);
+    const cardsByName = Api && typeof Api.getCardsByNames === 'function'
+      ? await Api.getCardsByNames(names)
+      : new Map();
+    const resolved = Ydk.resolvePlaintextDeck(parsed, { cardsByName });
+    if (resolved.missingNames.length > 0) {
+      return {
+        deck: null,
+        errors: resolved.missingNames.map((name) => `ไม่พบการ์ดชื่อ "${name}" ในฐานข้อมูล`),
+      };
+    }
+    return { deck: resolved.deck, errors: [] };
+  }
+
+  async function exportRecipeTextWithFallback({
+    text,
+    copiedToast,
+    modalTitle,
+    modalDescriptionHtml,
+    textareaId,
+    textareaRows,
+    copyBtnId,
+    closeBtnId,
+    fallbackCopiedToast,
+  }) {
+    const App = root.YgoTower.App;
+    const copied = await copyTextToClipboard(text);
+    if (copied) {
+      App.showToast(copiedToast);
+      return;
+    }
+
+    App.openModal(`
+      <h3 class="card-title">${modalTitle}</h3>
+      <p class="muted" style="margin-top:0;">${modalDescriptionHtml}</p>
+      <textarea id="${textareaId}" readonly rows="${textareaRows}" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;">${App.escapeHtml(text)}</textarea>
+      <div class="form-row" style="justify-content:flex-end; gap:8px; margin-top:12px;">
+        <button type="button" class="btn" id="${copyBtnId}">📋 คัดลอก</button>
+        <button type="button" class="btn btn-primary" id="${closeBtnId}">ปิด</button>
+      </div>
+    `);
+
+    const textarea = document.getElementById(textareaId);
+    if (textarea) {
+      textarea.focus?.();
+      textarea.select?.();
+    }
+    document.getElementById(copyBtnId).addEventListener('click', async () => {
+      if (textarea) {
+        textarea.focus?.();
+        textarea.select?.();
+      }
+      const ok = await copyTextToClipboard(text);
+      if (ok) {
+        App.showToast(fallbackCopiedToast);
+      } else {
+        App.showToast('กรุณากด Ctrl+C / Cmd+C เพื่อคัดลอกด้วยตนเอง');
+      }
+    });
+    document.getElementById(closeBtnId).addEventListener('click', () => App.closeModal());
   }
 
   async function openRecipeCardModal(card, ownedCount, neededCount, options = {}) {
@@ -299,9 +389,9 @@
       if (!activeRecipe || !evaluation) {
         return `
           <div class="card">
-            <h3 class="card-title">📜 จัดการ Recipe (.ydk / YDKE)</h3>
+            <h3 class="card-title">📜 จัดการ Recipe (.ydk / YDKE / Plaintext)</h3>
             <p class="muted">
-              อัปโหลดไฟล์ <code>.ydk</code> หรือวางลิงก์ <code>ydke://</code> เพื่อบันทึก Deck Recipe ไว้ดูรายการการ์ดที่ต้องการ (สูงสุด ${maxRecipes} Deck)
+              อัปโหลดไฟล์ <code>.ydk</code>, วางลิงก์ <code>ydke://</code> หรือวางรายชื่อการ์ดแบบ <code>Plaintext</code> เพื่อบันทึก Deck Recipe ไว้ดูรายการการ์ดที่ต้องการ (สูงสุด ${maxRecipes} Deck)
             </p>
             <p class="muted">
               • การ์ดที่ <strong>มีอยู่ในคลัง</strong> ของ Season ปัจจุบันจะแสดงที่ <code>opacity: 1</code><br />
@@ -321,8 +411,10 @@
               <button class="btn btn-sm" id="replaceRecipeYdkBtn">🔄 อัปเดต .ydk</button>
               <input type="file" id="replaceRecipeYdkInput" accept=".ydk" style="display:none;" />
               <button class="btn btn-sm" id="replaceRecipeYdkeBtn">🔄 อัปเดต YDKE</button>
+              <button class="btn btn-sm" id="replaceRecipePlaintextBtn">🔄 อัปเดต Plaintext</button>
               <button class="btn btn-sm btn-gold" id="exportRecipeYdkBtn">📥 Export .ydk</button>
               <button class="btn btn-sm btn-gold" id="exportRecipeYdkeBtn">📥 Export YDKE</button>
+              <button class="btn btn-sm btn-gold" id="exportRecipePlaintextBtn">📥 Export Plaintext</button>
               <button class="btn btn-sm btn-danger" id="deleteRecipeBtn">🗑️ ลบ</button>
             </div>
           </div>
@@ -373,12 +465,15 @@
                 <button class="btn" id="importRecipeYdkeBtn" style="flex:1;" ${atLimit ? 'disabled' : ''}>
                   📤 เพิ่มจาก YDKE
                 </button>
+                <button class="btn" id="importRecipePlaintextBtn" style="flex:1;" ${atLimit ? 'disabled' : ''}>
+                  📤 เพิ่มจาก Plaintext
+                </button>
               </div>
               <input type="file" id="uploadRecipeYdkInput" accept=".ydk" multiple style="display:none;" />
               ${
                 atLimit
                   ? `<div class="muted" style="color:var(--warning); font-size:0.78rem; margin-top:6px;">บันทึกครบ ${maxRecipes} Deck แล้ว กรุณาลบ Deck เดิมก่อนเพิ่มใหม่</div>`
-                  : `<div class="muted" style="font-size:0.78rem; margin-top:6px;">รองรับเลือกหลายไฟล์พร้อมกัน หรือเพิ่มจากลิงก์ YDKE (สูงสุด ${maxRecipes} Deck)</div>`
+                  : `<div class="muted" style="font-size:0.78rem; margin-top:6px;">รองรับเลือกหลายไฟล์ .ydk, ลิงก์ YDKE หรือ Plaintext (สูงสุด ${maxRecipes} Deck)</div>`
               }
             </div>
             <div class="floor-list recipe-list-scroll" id="recipeList">${renderRecipeList()}</div>
@@ -445,54 +540,117 @@
       });
     }
 
+    const parseYdkeForRecipe = (rawUri) => {
+      let parsed;
+      try {
+        parsed = Ydk.parseYdke(rawUri);
+      } catch (err) {
+        return { deck: null, errors: [err && err.message ? err.message : 'รูปแบบลิงก์ YDKE ไม่ถูกต้อง'] };
+      }
+      if (parsed.main.length + parsed.extra.length + parsed.side.length === 0) {
+        return { deck: null, errors: ['ไม่พบการ์ดในลิงก์ YDKE นี้'] };
+      }
+      return { deck: parsed, errors: [] };
+    };
+
+    const handleAddRecipeFromText = async (modalOpts, resolveFn, failToast) => {
+      const latestCount = (await DB.getRecipes()).length;
+      const defaultName = `Recipe #${latestCount + 1}`;
+      openRecipeTextModal({
+        ...modalOpts,
+        showNameInput: true,
+        defaultName,
+        submitLabel: 'บันทึก Recipe',
+        onSubmit: async ({ rawText, rawName, showError }) => {
+          const currentCount = (await DB.getRecipes()).length;
+          if (currentCount >= maxRecipes) {
+            App.showToast(`บันทึกได้สูงสุด ${maxRecipes} Deck`);
+            showError(`บันทึกครบ ${maxRecipes} Deck แล้ว กรุณาลบ Deck เดิมก่อนเพิ่มใหม่`);
+            return;
+          }
+
+          const { deck, errors } = await resolveFn(rawText);
+          if (errors.length > 0) {
+            App.showToast(failToast);
+            showError(errors);
+            return;
+          }
+
+          const name = rawName.trim() || defaultName;
+          const newId = await DB.saveRecipe({
+            name,
+            main: deck.main,
+            extra: deck.extra,
+            side: deck.side,
+          });
+          selectedRecipeId = newId;
+          App.closeModal();
+          App.showToast(`บันทึก Recipe "${name}" สำเร็จ`);
+          await renderRecipesView(container, state);
+        },
+      });
+    };
+
+    const handleReplaceRecipeFromText = (recipe, modalOpts, resolveFn) => {
+      openRecipeTextModal({
+        ...modalOpts,
+        showNameInput: false,
+        submitLabel: 'อัปเดต Recipe',
+        onSubmit: async ({ rawText, showError }) => {
+          const { deck, errors } = await resolveFn(rawText);
+          if (errors.length > 0) {
+            App.showToast('ไม่สามารถอัปเดต Recipe ได้');
+            showError(errors);
+            return;
+          }
+
+          await DB.saveRecipe({
+            ...recipe,
+            main: deck.main,
+            extra: deck.extra,
+            side: deck.side,
+          });
+          App.closeModal();
+          App.showToast(`อัปเดต "${recipe.name}" เรียบร้อยแล้ว`);
+          await renderRecipesView(container, state);
+        },
+      });
+    };
+
     const importYdkeBtn = document.getElementById('importRecipeYdkeBtn');
     if (importYdkeBtn) {
-      importYdkeBtn.addEventListener('click', async () => {
-        const latestCount = (await DB.getRecipes()).length;
-        const defaultName = `Recipe #${latestCount + 1}`;
-        openYdkeInputModal({
-          title: '📤 เพิ่ม Recipe จากลิงก์ YDKE',
-          description: 'วางลิงก์รูปแบบ <code>ydke://...</code> เพื่อบันทึกเป็น Recipe ใหม่',
-          showNameInput: true,
-          defaultName,
-          submitLabel: 'บันทึก Recipe',
-          onSubmit: async ({ rawUri, rawName, showError }) => {
-            const currentCount = (await DB.getRecipes()).length;
-            if (currentCount >= maxRecipes) {
-              App.showToast(`บันทึกได้สูงสุด ${maxRecipes} Deck`);
-              showError(`บันทึกครบ ${maxRecipes} Deck แล้ว กรุณาลบ Deck เดิมก่อนเพิ่มใหม่`);
-              return;
-            }
-
-            let parsed;
-            try {
-              parsed = Ydk.parseYdke(rawUri);
-            } catch (err) {
-              App.showToast('ไม่สามารถเพิ่ม Recipe จาก YDKE ได้');
-              showError(err && err.message ? err.message : 'รูปแบบลิงก์ YDKE ไม่ถูกต้อง');
-              return;
-            }
-
-            if (parsed.main.length + parsed.extra.length + parsed.side.length === 0) {
-              App.showToast('ไม่สามารถเพิ่ม Recipe จาก YDKE ได้');
-              showError('ไม่พบการ์ดในลิงก์ YDKE นี้');
-              return;
-            }
-
-            const name = rawName.trim() || defaultName;
-            const newId = await DB.saveRecipe({
-              name,
-              main: parsed.main,
-              extra: parsed.extra,
-              side: parsed.side,
-            });
-            selectedRecipeId = newId;
-            App.closeModal();
-            App.showToast(`บันทึก Recipe "${name}" สำเร็จ`);
-            await renderRecipesView(container, state);
+      importYdkeBtn.addEventListener('click', () =>
+        handleAddRecipeFromText(
+          {
+            title: '📤 เพิ่ม Recipe จากลิงก์ YDKE',
+            description: 'วางลิงก์รูปแบบ <code>ydke://...</code> เพื่อบันทึกเป็น Recipe ใหม่',
           },
-        });
-      });
+          (raw) => parseYdkeForRecipe(raw),
+          'ไม่สามารถเพิ่ม Recipe จาก YDKE ได้'
+        )
+      );
+    }
+
+    const importPlaintextBtn = document.getElementById('importRecipePlaintextBtn');
+    if (importPlaintextBtn) {
+      importPlaintextBtn.addEventListener('click', () =>
+        handleAddRecipeFromText(
+          {
+            title: '📤 เพิ่ม Recipe จาก Plaintext',
+            description:
+              'วางรายชื่อการ์ดรูปแบบ <code>จำนวน ชื่อการ์ด</code> แยกตามโซน <code>Main Deck:</code>, <code>Extra Deck:</code>, <code>Side Deck:</code>',
+            placeholder: 'Main Deck:\n2 Dark Magician\n\nExtra Deck:\n1 Road Warrior\n\nSide Deck:\n3 Nitro Warrior',
+            rows: 10,
+            nameInputId: 'recipePlaintextNameInput',
+            textareaId: 'recipePlaintextTextarea',
+            errorBoxId: 'recipePlaintextErrorBox',
+            cancelBtnId: 'cancelRecipePlaintextBtn',
+            confirmBtnId: 'confirmRecipePlaintextBtn',
+          },
+          (raw) => resolveRecipePlaintext(raw, Ydk, Api),
+          'ไม่สามารถเพิ่ม Recipe จาก Plaintext ได้'
+        )
+      );
     }
 
     // Select recipe from list
@@ -531,40 +689,33 @@
         renderRecipesView(container, state);
       });
 
-      document.getElementById('replaceRecipeYdkeBtn').addEventListener('click', () => {
-        openYdkeInputModal({
-          title: '🔄 อัปเดต Recipe จากลิงก์ YDKE',
-          description: `วางลิงก์ <code>ydke://...</code> เพื่ออัปเดตรายการการ์ดของ <strong>${App.escapeHtml(activeRecipe.name)}</strong>`,
-          showNameInput: false,
-          submitLabel: 'อัปเดต Recipe',
-          onSubmit: async ({ rawUri, showError }) => {
-            let parsed;
-            try {
-              parsed = Ydk.parseYdke(rawUri);
-            } catch (err) {
-              App.showToast('ไม่สามารถอัปเดต Recipe ได้');
-              showError(err && err.message ? err.message : 'รูปแบบลิงก์ YDKE ไม่ถูกต้อง');
-              return;
-            }
-
-            if (parsed.main.length + parsed.extra.length + parsed.side.length === 0) {
-              App.showToast('ไม่สามารถอัปเดต Recipe ได้');
-              showError('ไม่พบการ์ดในลิงก์ YDKE นี้');
-              return;
-            }
-
-            await DB.saveRecipe({
-              ...activeRecipe,
-              main: parsed.main,
-              extra: parsed.extra,
-              side: parsed.side,
-            });
-            App.closeModal();
-            App.showToast(`อัปเดต "${activeRecipe.name}" เรียบร้อยแล้ว`);
-            await renderRecipesView(container, state);
+      document.getElementById('replaceRecipeYdkeBtn').addEventListener('click', () =>
+        handleReplaceRecipeFromText(
+          activeRecipe,
+          {
+            title: '🔄 อัปเดต Recipe จากลิงก์ YDKE',
+            description: `วางลิงก์ <code>ydke://...</code> เพื่ออัปเดตรายการการ์ดของ <strong>${App.escapeHtml(activeRecipe.name)}</strong>`,
           },
-        });
-      });
+          (raw) => parseYdkeForRecipe(raw)
+        )
+      );
+
+      document.getElementById('replaceRecipePlaintextBtn').addEventListener('click', () =>
+        handleReplaceRecipeFromText(
+          activeRecipe,
+          {
+            title: '🔄 อัปเดต Recipe จาก Plaintext',
+            description: `วางรายชื่อการ์ดรูปแบบ <code>จำนวน ชื่อการ์ด</code> เพื่ออัปเดตรายการการ์ดของ <strong>${App.escapeHtml(activeRecipe.name)}</strong>`,
+            placeholder: 'Main Deck:\n2 Dark Magician\n\nExtra Deck:\n1 Road Warrior\n\nSide Deck:\n3 Nitro Warrior',
+            rows: 10,
+            textareaId: 'recipePlaintextTextarea',
+            errorBoxId: 'recipePlaintextErrorBox',
+            cancelBtnId: 'cancelRecipePlaintextBtn',
+            confirmBtnId: 'confirmRecipePlaintextBtn',
+          },
+          (raw) => resolveRecipePlaintext(raw, Ydk, Api)
+        )
+      );
 
       document.getElementById('exportRecipeYdkBtn').addEventListener('click', () => {
         const ydkText = Ydk.generateYdk(activeRecipe);
@@ -582,40 +733,34 @@
           return;
         }
 
-        const copied = await copyTextToClipboard(ydkeUri);
-        if (copied) {
-          App.showToast(`คัดลอกลิงก์ YDKE ของ "${activeRecipe.name}" สำเร็จ`);
-          return;
-        }
-
-        App.openModal(`
-          <h3 class="card-title">📥 Export ลิงก์ YDKE</h3>
-          <p class="muted" style="margin-top:0;">ไม่สามารถคัดลอกลง Clipboard อัตโนมัติได้ กรุณาคัดลอกลิงก์ของ <strong>${App.escapeHtml(activeRecipe.name)}</strong> ด้านล่าง:</p>
-          <textarea id="exportRecipeYdkeTextarea" readonly rows="4" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:0.85rem;">${App.escapeHtml(ydkeUri)}</textarea>
-          <div class="form-row" style="justify-content:flex-end; gap:8px; margin-top:12px;">
-            <button type="button" class="btn" id="copyExportRecipeYdkeFallbackBtn">📋 คัดลอก</button>
-            <button type="button" class="btn btn-primary" id="closeExportRecipeYdkeModalBtn">ปิด</button>
-          </div>
-        `);
-
-        const textarea = document.getElementById('exportRecipeYdkeTextarea');
-        if (textarea) {
-          textarea.focus?.();
-          textarea.select?.();
-        }
-        document.getElementById('copyExportRecipeYdkeFallbackBtn').addEventListener('click', async () => {
-          if (textarea) {
-            textarea.focus?.();
-            textarea.select?.();
-          }
-          const ok = await copyTextToClipboard(ydkeUri);
-          if (ok) {
-            App.showToast(`คัดลอกลิงก์ YDKE ของ "${activeRecipe.name}" สำเร็จ`);
-          } else {
-            App.showToast('กรุณากด Ctrl+C / Cmd+C เพื่อคัดลอกด้วยตนเอง');
-          }
+        const copiedToast = `คัดลอกลิงก์ YDKE ของ "${activeRecipe.name}" สำเร็จ`;
+        await exportRecipeTextWithFallback({
+          text: ydkeUri,
+          copiedToast,
+          modalTitle: '📥 Export ลิงก์ YDKE',
+          modalDescriptionHtml: `ไม่สามารถคัดลอกลง Clipboard อัตโนมัติได้ กรุณาคัดลอกลิงก์ของ <strong>${App.escapeHtml(activeRecipe.name)}</strong> ด้านล่าง:`,
+          textareaId: 'exportRecipeYdkeTextarea',
+          textareaRows: 4,
+          copyBtnId: 'copyExportRecipeYdkeFallbackBtn',
+          closeBtnId: 'closeExportRecipeYdkeModalBtn',
+          fallbackCopiedToast: copiedToast,
         });
-        document.getElementById('closeExportRecipeYdkeModalBtn').addEventListener('click', () => App.closeModal());
+      });
+
+      document.getElementById('exportRecipePlaintextBtn').addEventListener('click', async () => {
+        const plaintext = Ydk.generatePlaintextDeck(activeRecipe, cardMap);
+        const copiedToast = `คัดลอก Recipe Plaintext ของ "${activeRecipe.name}" สำเร็จ`;
+        await exportRecipeTextWithFallback({
+          text: plaintext,
+          copiedToast,
+          modalTitle: '📥 Export Recipe Plaintext',
+          modalDescriptionHtml: `ไม่สามารถคัดลอกลง Clipboard อัตโนมัติได้ กรุณาคัดลอกรายชื่อการ์ดของ <strong>${App.escapeHtml(activeRecipe.name)}</strong> ด้านล่าง:`,
+          textareaId: 'exportRecipePlaintextTextarea',
+          textareaRows: 10,
+          copyBtnId: 'copyExportRecipePlaintextFallbackBtn',
+          closeBtnId: 'closeExportRecipePlaintextModalBtn',
+          fallbackCopiedToast: copiedToast,
+        });
       });
 
       document.getElementById('deleteRecipeBtn').addEventListener('click', async () => {
