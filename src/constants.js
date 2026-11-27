@@ -262,6 +262,96 @@
     return { winEvp, lossEvp, packThreshold, pickCardThreshold };
   }
 
+  const DEFAULT_PULL_RATES = {
+    ocg: {
+      cardsPerPack: 5,
+      // Weights for each slot
+      weights: {
+        common: 72,
+        rare: 18,
+        super: 6,
+        ultra: 3,
+        secret: 1,
+      },
+    },
+    tcg: {
+      cardsPerPack: 9,
+      commonSlots: 7,
+      rareSlots: 1,
+      // Foil slot probabilities (sum = 100)
+      foilWeights: {
+        super: 70,
+        ultra: 22,
+        secret: 8,
+      },
+    },
+  };
+
+  const PULL_RATE_PRESETS = {
+    default: {
+      id: 'default',
+      label: 'มาตรฐาน (Default)',
+      ocgWeights: { ...DEFAULT_PULL_RATES.ocg.weights },
+      tcgFoilWeights: { ...DEFAULT_PULL_RATES.tcg.foilWeights },
+    },
+    generous: {
+      id: 'generous',
+      label: 'เล่นสบาย (Generous)',
+      ocgWeights: { common: 55, rare: 23, super: 12, ultra: 7, secret: 3 },
+      tcgFoilWeights: { super: 50, ultra: 32, secret: 18 },
+    },
+    high_roll: {
+      id: 'high_roll',
+      label: 'สายสปีด (High Roll)',
+      ocgWeights: { common: 35, rare: 25, super: 18, ultra: 12, secret: 10 },
+      tcgFoilWeights: { super: 25, ultra: 40, secret: 35 },
+    },
+  };
+
+  function normalizeWeightGroup(rawWeights, fallbackWeights) {
+    const src = rawWeights && typeof rawWeights === 'object' ? rawWeights : {};
+    const out = {};
+    let total = 0;
+    for (const [key, fallback] of Object.entries(fallbackWeights)) {
+      const n = Number(src[key]);
+      const val = Number.isFinite(n) && n >= 0 ? n : fallback;
+      out[key] = val;
+      total += val;
+    }
+    return total > 0 ? out : { ...fallbackWeights };
+  }
+
+  /**
+   * Normalize pullRates settings with safe fallbacks for legacy or partial settings objects.
+   */
+  function getPullRatesConfig(settings) {
+    const raw = (settings && settings.pullRates) || {};
+    const rawOcg = raw.ocg || {};
+    const rawTcg = raw.tcg || {};
+
+    const toPosInt = (val, fallback) => {
+      const n = Number(val);
+      return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback;
+    };
+    const toNonNegInt = (val, fallback) => {
+      const n = Number(val);
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+    };
+
+    return {
+      ocg: {
+        cardsPerPack: toPosInt(rawOcg.cardsPerPack, DEFAULT_PULL_RATES.ocg.cardsPerPack),
+        weights: normalizeWeightGroup(rawOcg.weights, DEFAULT_PULL_RATES.ocg.weights),
+      },
+      tcg: {
+        cardsPerPack: toPosInt(rawTcg.cardsPerPack, DEFAULT_PULL_RATES.tcg.cardsPerPack),
+        commonSlots: toNonNegInt(rawTcg.commonSlots, DEFAULT_PULL_RATES.tcg.commonSlots),
+        rareSlots: toNonNegInt(rawTcg.rareSlots, DEFAULT_PULL_RATES.tcg.rareSlots),
+        foilWeights: normalizeWeightGroup(rawTcg.foilWeights, DEFAULT_PULL_RATES.tcg.foilWeights),
+      },
+    };
+  }
+
   const DEFAULT_SETTINGS = {
     id: 'global',
     minibossRematchRatio: 0.5, // 50% of floor pack price
@@ -277,26 +367,14 @@
     })),
     pullRates: {
       ocg: {
-        cardsPerPack: 5,
-        // Weights for each slot
-        weights: {
-          common: 72,
-          rare: 18,
-          super: 6,
-          ultra: 3,
-          secret: 1,
-        },
+        cardsPerPack: DEFAULT_PULL_RATES.ocg.cardsPerPack,
+        weights: { ...DEFAULT_PULL_RATES.ocg.weights },
       },
       tcg: {
-        cardsPerPack: 9,
-        commonSlots: 7,
-        rareSlots: 1,
-        // Foil slot probabilities (sum = 100)
-        foilWeights: {
-          super: 70,
-          ultra: 22,
-          secret: 8,
-        },
+        cardsPerPack: DEFAULT_PULL_RATES.tcg.cardsPerPack,
+        commonSlots: DEFAULT_PULL_RATES.tcg.commonSlots,
+        rareSlots: DEFAULT_PULL_RATES.tcg.rareSlots,
+        foilWeights: { ...DEFAULT_PULL_RATES.tcg.foilWeights },
       },
     },
   };
@@ -318,6 +396,8 @@
     getPackImageUrl,
     DEFAULT_EVENT_CONFIG,
     getEventConfig,
+    PULL_RATE_PRESETS,
+    getPullRatesConfig,
     DEFAULT_SETTINGS,
     ROLES,
     MAX_RECIPES,

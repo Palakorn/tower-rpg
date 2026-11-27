@@ -112,7 +112,10 @@
       throw new Error('ซองนี้ยังไม่มีข้อมูลการ์ดในแคช');
     }
 
-    const pullRates = (settings && settings.pullRates) || Constants.DEFAULT_SETTINGS.pullRates;
+    const pullRates =
+      typeof Constants.getPullRatesConfig === 'function'
+        ? Constants.getPullRatesConfig(settings)
+        : (settings && settings.pullRates) || Constants.DEFAULT_SETTINGS.pullRates;
     const buckets = groupByRarity(setCards);
     const pulled = [];
 

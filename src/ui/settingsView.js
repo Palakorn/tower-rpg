@@ -2,17 +2,71 @@
   root.YgoTower = root.YgoTower || {};
   root.YgoTower.Views = root.YgoTower.Views || {};
 
+  const PULL_RATE_ROWS = {
+    tcg: [
+      { key: 'super', label: 'Super Rare' },
+      { key: 'ultra', label: 'Ultra Rare' },
+      { key: 'secret', label: 'Secret Rare' },
+    ],
+    ocg: [
+      { key: 'common', label: 'Common' },
+      { key: 'rare', label: 'Rare' },
+      { key: 'super', label: 'Super Rare' },
+      { key: 'ultra', label: 'Ultra Rare' },
+      { key: 'secret', label: 'Secret Rare' },
+    ],
+  };
+
+  function renderPullRateRows(template, weights) {
+    return PULL_RATE_ROWS[template]
+      .map(
+        ({ key, label }) => `
+        <div class="pull-rate-row">
+          <span class="badge badge-${key}">${label}</span>
+          <input
+            type="number"
+            min="0"
+            step="any"
+            data-pull-weight="${template}:${key}"
+            value="${weights[key]}"
+            class="pull-rate-input"
+          />
+          <span class="muted pull-rate-pct" data-pull-pct="${template}:${key}">0.0%</span>
+        </div>
+      `
+      )
+      .join('');
+  }
+
+  function weightsEqual(a, b) {
+    const keys = Object.keys(b);
+    return keys.every((k) => Math.abs(Number(a[k]) - Number(b[k])) < 1e-9);
+  }
+
   async function renderSettingsView(container, state) {
     const App = root.YgoTower.App;
+    const Constants = root.YgoTower.Constants;
     const DB = root.YgoTower.DB;
     const Api = root.YgoTower.Api;
     const SaveManager = root.YgoTower.SaveManager;
     const db = DB.getDB();
 
     const settings = state.settings;
-    const eventCfg = root.YgoTower.Constants.getEventConfig(settings);
+    const eventCfg = Constants.getEventConfig(settings);
+    const pullRates = Constants.getPullRatesConfig(settings);
+    const presets = Constants.PULL_RATE_PRESETS || {};
     const cacheStats = await Api.getCacheStats();
     const allSets = await db.sets.toArray();
+
+    const presetButtonsHtml = Object.values(presets)
+      .map(
+        (p) => `
+        <button type="button" class="btn btn-sm" data-pull-preset="${App.escapeHtml(p.id)}">
+          ${App.escapeHtml(p.label)}
+        </button>
+      `
+      )
+      .join('');
 
     const ecoRows = settings.floorEconomy
       .map(
@@ -88,6 +142,42 @@
         </div>
       </div>
 
+      <div class="card" id="pullRatesCard">
+        <h3 class="card-title">
+          <span>🎲 ตั้งค่าเรตเปิดซอง (Pull Rates)</span>
+          <span class="muted" style="font-size:0.84rem;">กรอกเป็นค่าน้ำหนัก (ไม่ต้องรวมได้ 100 ระบบคำนวณ % ให้อัตโนมัติ)</span>
+        </h3>
+        <div class="form-row">
+          <span class="muted">Preset:</span>
+          ${presetButtonsHtml}
+        </div>
+        <div class="pull-rates-grid">
+          <div class="pull-rate-box">
+            <div class="pull-rate-box-header">
+              <strong>ซอง TCG (${pullRates.tcg.cardsPerPack} ใบ/ซอง)</strong>
+              <span class="muted" id="tcgPullTotal">รวมน้ำหนัก: 100</span>
+            </div>
+            <div class="muted" style="font-size:0.84rem;">
+              การันตี Common ${pullRates.tcg.commonSlots} ใบ + Rare ${pullRates.tcg.rareSlots} ใบ + ช่อง Foil 1 ใบ (สุ่มตามเรตด้านล่าง)
+            </div>
+            ${renderPullRateRows('tcg', pullRates.tcg.foilWeights)}
+          </div>
+          <div class="pull-rate-box">
+            <div class="pull-rate-box-header">
+              <strong>ซอง OCG (${pullRates.ocg.cardsPerPack} ใบ/ซอง)</strong>
+              <span class="muted" id="ocgPullTotal">รวมน้ำหนัก: 100</span>
+            </div>
+            <div class="muted" style="font-size:0.84rem;">
+              สุ่มอิสระทั้ง ${pullRates.ocg.cardsPerPack} ใบ/ซอง ตามน้ำหนักด้านล่าง
+            </div>
+            ${renderPullRateRows('ocg', pullRates.ocg.weights)}
+          </div>
+        </div>
+        <div class="form-row" style="margin-top:12px; justify-content:flex-end;">
+          <button class="btn btn-primary" id="savePullRatesBtn">💾 บันทึกเรตเปิดซอง</button>
+        </div>
+      </div>
+
       <div class="card">
         <h3 class="card-title">🗂️ จัดการซองประจำชั้น (${allSets.length} ซอง)</h3>
         <input type="text" id="setFilterInput" placeholder="ค้นหาชื่อซองหรือรหัสซองเพื่อย้ายชั้น/สลับ OCG-TCG..." style="width:100%; margin-bottom:10px;" />
@@ -134,6 +224,127 @@
       }
     });
 
+    const readTemplateWeights = (template) => {
+      const result = {};
+      for (const { key, label } of PULL_RATE_ROWS[template]) {
+        const input = container.querySelector(`[data-pull-weight="${template}:${key}"]`);
+        const rawText = input ? String(input.value).trim() : '';
+        const val = rawText === '' ? NaN : Number(rawText);
+        if (!Number.isFinite(val) || val < 0) {
+          return {
+            ok: false,
+            error: `น้ำหนัก ${label} (${template.toUpperCase()}) ต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป`,
+          };
+        }
+        result[key] = val;
+      }
+      const total = Object.values(result).reduce((sum, n) => sum + n, 0);
+      if (total <= 0) {
+        return {
+          ok: false,
+          error: `ผลรวมน้ำหนักของซอง ${template.toUpperCase()} ต้องมากกว่า 0`,
+        };
+      }
+      return { ok: true, weights: result, total };
+    };
+
+    const readPullRatesFromForm = () => {
+      const tcgRes = readTemplateWeights('tcg');
+      if (!tcgRes.ok) return tcgRes;
+      const ocgRes = readTemplateWeights('ocg');
+      if (!ocgRes.ok) return ocgRes;
+
+      return {
+        ok: true,
+        pullRates: Constants.getPullRatesConfig({
+          pullRates: {
+            ocg: {
+              cardsPerPack: pullRates.ocg.cardsPerPack,
+              weights: ocgRes.weights,
+            },
+            tcg: {
+              cardsPerPack: pullRates.tcg.cardsPerPack,
+              commonSlots: pullRates.tcg.commonSlots,
+              rareSlots: pullRates.tcg.rareSlots,
+              foilWeights: tcgRes.weights,
+            },
+          },
+        }),
+      };
+    };
+
+    const refreshPullRatePreview = () => {
+      const current = {};
+      for (const template of ['tcg', 'ocg']) {
+        const map = {};
+        let total = 0;
+        for (const { key } of PULL_RATE_ROWS[template]) {
+          const input = container.querySelector(`[data-pull-weight="${template}:${key}"]`);
+          const n = Number(input ? input.value : 0);
+          const val = Number.isFinite(n) && n >= 0 ? n : 0;
+          map[key] = val;
+          total += val;
+        }
+        current[template] = map;
+
+        for (const { key } of PULL_RATE_ROWS[template]) {
+          const pctEl = container.querySelector(`[data-pull-pct="${template}:${key}"]`);
+          if (pctEl) {
+            const pct = total > 0 ? (map[key] / total) * 100 : 0;
+            pctEl.textContent = `${pct.toFixed(1)}%`;
+          }
+        }
+        const totalEl = document.getElementById(template === 'tcg' ? 'tcgPullTotal' : 'ocgPullTotal');
+        if (totalEl) {
+          const formattedTotal = Number.isInteger(total) ? total : Number(total.toFixed(2));
+          totalEl.textContent = `รวมน้ำหนัก: ${formattedTotal}`;
+        }
+      }
+
+      container.querySelectorAll('[data-pull-preset]').forEach((btn) => {
+        const preset = presets[btn.dataset.pullPreset];
+        const isMatch =
+          preset &&
+          weightsEqual(current.tcg, preset.tcgFoilWeights) &&
+          weightsEqual(current.ocg, preset.ocgWeights);
+        btn.classList.toggle('btn-gold', Boolean(isMatch));
+      });
+    };
+
+    refreshPullRatePreview();
+
+    container.querySelectorAll('[data-pull-weight]').forEach((input) => {
+      input.addEventListener('input', refreshPullRatePreview);
+    });
+
+    container.querySelectorAll('[data-pull-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const preset = presets[btn.dataset.pullPreset];
+        if (!preset) return;
+        for (const { key } of PULL_RATE_ROWS.tcg) {
+          const input = container.querySelector(`[data-pull-weight="tcg:${key}"]`);
+          if (input) input.value = String(preset.tcgFoilWeights[key]);
+        }
+        for (const { key } of PULL_RATE_ROWS.ocg) {
+          const input = container.querySelector(`[data-pull-weight="ocg:${key}"]`);
+          if (input) input.value = String(preset.ocgWeights[key]);
+        }
+        refreshPullRatePreview();
+      });
+    });
+
+    document.getElementById('savePullRatesBtn').addEventListener('click', async () => {
+      const pullRes = readPullRatesFromForm();
+      if (!pullRes.ok) {
+        App.showToast(pullRes.error);
+        return;
+      }
+      settings.pullRates = pullRes.pullRates;
+      await DB.saveSettings(settings);
+      App.showToast('บันทึกเรตเปิดซองเรียบร้อย');
+      App.renderCurrentView();
+    });
+
     document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
       const winEvp = Math.floor(Number(document.getElementById('winEvpInput').value));
       const lossEvp = Math.floor(Number(document.getElementById('lossEvpInput').value));
@@ -153,6 +364,12 @@
         return;
       }
 
+      const pullRes = readPullRatesFromForm();
+      if (!pullRes.ok) {
+        App.showToast(pullRes.error);
+        return;
+      }
+
       settings.minibossRematchRatio = Number(document.getElementById('minibossRatioInput').value) || 0.5;
       settings.bossRematchRatio = Number(document.getElementById('bossRatioInput').value) || 1.0;
       settings.eventConfig = {
@@ -161,6 +378,7 @@
         packThreshold,
         pickCardThreshold,
       };
+      settings.pullRates = pullRes.pullRates;
 
       container.querySelectorAll('[data-eco]').forEach((input) => {
         const [floorStr, field] = input.dataset.eco.split(':');
